@@ -8,27 +8,42 @@ struct LiveView: View {
     @AppStorage(SettingsKey.appearance) private var appearance: AppearanceMode = .system
     @State private var showTranscript = false
 
-    /// Newest first: the words being spoken right now at the top, then each earlier sentence
-    /// below it. Only the live view is reversed; saved transcripts read in normal order.
-    private var blocks: [(id: String, text: String)] {
-        var result: [(id: String, text: String)] = []
+    /// The conversation as flowing paragraphs in normal reading order, newest words at the end.
+    /// The newest words are solid; each earlier sentence is a little lighter, so the eye is drawn
+    /// to what was just said. A new paragraph starts after a pause.
+    private var flowingText: AttributedString {
+        let segments = (controller.current?.segments ?? []).suffix(80)
         let pending = controller.transcriber.volatileText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !pending.isEmpty { result.append((id: "pending", text: pending)) }
-        let segments = controller.current?.segments ?? []
-        for segment in segments.reversed().prefix(60) {
-            result.append((id: segment.id.uuidString, text: segment.text))
+        var text = AttributedString()
+        var previous: Date?
+        for (offset, segment) in segments.enumerated() {
+            if let previous {
+                text += AttributedString(segment.time.timeIntervalSince(previous) > 4 ? "\n\n" : " ")
+            }
+            var part = AttributedString(segment.text)
+            part.foregroundColor = Color.primary.opacity(Self.opacity(age: segments.count - 1 - offset))
+            text += part
+            previous = segment.time
         }
-        return result
+        if !pending.isEmpty {
+            if let previous {
+                text += AttributedString(Date.now.timeIntervalSince(previous) > 4 ? "\n\n" : " ")
+            }
+            var part = AttributedString(pending)
+            part.foregroundColor = Color.primary
+            text += part
+        }
+        return text
     }
 
-    /// The newest words are full strength; older lines fade toward grey as they move down.
-    private func opacity(at index: Int, hasPending: Bool) -> Double {
-        let age = index - (hasPending ? 1 : 0)
+    /// 0 is the newest finished sentence.
+    private static func opacity(age: Int) -> Double {
         switch age {
-        case ...0: return 1
-        case 1: return 0.62
-        case 2: return 0.45
-        default: return 0.34
+        case 0: 1
+        case 1: 0.72
+        case 2: 0.56
+        case 3: 0.46
+        default: 0.38
         }
     }
 
@@ -46,8 +61,11 @@ struct LiveView: View {
                     .padding(.horizontal, 24)
                     .padding(.vertical, 16)
             }
-            // Newest words are at the top, so the view stays anchored there.
-            .defaultScrollAnchor(.top)
+            // Text starts at the top and fills down; once the screen is full the newest words stay
+            // pinned to the bottom and older lines scroll off the top, like dictation.
+            .defaultScrollAnchor(.top, for: .alignment)
+            .defaultScrollAnchor(.bottom, for: .initialOffset)
+            .defaultScrollAnchor(.bottom, for: .sizeChanges)
             .scrollIndicators(.hidden)
 
             controls
@@ -73,26 +91,19 @@ struct LiveView: View {
 
     @ViewBuilder
     private var captions: some View {
-        let blocks = blocks
-        if blocks.isEmpty {
+        let text = flowingText
+        if text.characters.isEmpty {
             Text(controller.isRecording ? "Listening…" : "Tap the button below to start captioning.")
                 .font(captionFont.font(size: 22).italic())
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity, minHeight: 240, alignment: .center)
                 .multilineTextAlignment(.center)
         } else {
-            let hasPending = blocks.first?.id == "pending"
-            VStack(alignment: .leading, spacing: captionSize * 0.5) {
-                ForEach(Array(blocks.enumerated()), id: \.element.id) { index, block in
-                    Text(block.text)
-                        .lineSpacing(captionSize * 0.18)
-                        .opacity(opacity(at: index, hasPending: hasPending))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-            .font(captionFont.font(size: captionSize))
-            .animation(.easeOut(duration: 0.35), value: blocks.count)
-            .textSelection(.enabled)
+            Text(text)
+                .font(captionFont.font(size: captionSize))
+                .lineSpacing(captionSize * 0.18)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
         }
     }
 
