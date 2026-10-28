@@ -9,11 +9,16 @@ import AppKit
 enum SavedRoute: Hashable {
     case day(Date)
     case tidyUp
+    /// A session opened from search, with its transcript search ready.
+    case match(CaptionSession, String)
 }
 
 struct HistoryView: View {
     @Environment(CaptionController.self) private var controller
     @Query(sort: \CaptionSession.startedAt, order: .reverse) private var sessions: [CaptionSession]
+    @State private var query = ""
+
+    private var trimmedQuery: String { query.trimmingCharacters(in: .whitespaces) }
 
     private var days: [(day: Date, sessions: [CaptionSession])] {
         Dictionary(grouping: sessions, by: \.day)
@@ -25,7 +30,9 @@ struct HistoryView: View {
 
     var body: some View {
         Group {
-            if sessions.isEmpty {
+            if !trimmedQuery.isEmpty {
+                SearchResultsView(sessions: sessions, query: trimmedQuery)
+            } else if sessions.isEmpty {
                 ContentUnavailableView(
                     "No saved sessions",
                     systemImage: "tray",
@@ -81,6 +88,10 @@ struct HistoryView: View {
             }
         }
         .navigationTitle("Saved")
+        .searchable(text: $query, prompt: "Search all sessions")
+        #if DEBUG
+        .onAppear { if let demo = DemoData.query, query.isEmpty { query = demo } }
+        #endif
         .navigationDestination(for: CaptionSession.self) { session in
             SessionDetailView(session: session)
         }
@@ -88,6 +99,7 @@ struct HistoryView: View {
             switch route {
             case .day(let day): DayView(day: day)
             case .tidyUp: TidyUpView()
+            case .match(let session, let query): SessionDetailView(session: session, findQuery: query)
             }
         }
     }
@@ -137,6 +149,9 @@ struct SessionRow: View {
 
 struct SessionDetailView: View {
     @Bindable var session: CaptionSession
+    /// Opens the transcript search with this text, when arriving from search results.
+    var findQuery = ""
+    @State private var showFind = false
     @Environment(\.dismiss) private var dismiss
     @Environment(CaptionController.self) private var controller
     @State private var confirmDelete = false
@@ -202,6 +217,21 @@ struct SessionDetailView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        .toolbar {
+            Button {
+                showFind = true
+            } label: {
+                Label("Find in transcript", systemImage: "text.magnifyingglass")
+            }
+        }
+        .sheet(isPresented: $showFind) {
+            TranscriptSearchView(session: session, initialQuery: findQuery)
+                .presentationDragIndicator(.visible)
+                #if os(macOS)
+                .frame(minWidth: 520, minHeight: 560)
+                #endif
+        }
+        .onAppear { if !findQuery.isEmpty { showFind = true } }
         .confirmationDialog("Delete this session?", isPresented: $confirmDelete) {
             Button("Delete", role: .destructive) {
                 controller.delete([session])

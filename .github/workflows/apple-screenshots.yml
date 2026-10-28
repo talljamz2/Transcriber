@@ -34,9 +34,10 @@ jobs:
           xcrun simctl install "$UDID" build/Debug-iphonesimulator/LiveCaptions.app
           mkdir -p shots
           for appearance in light dark; do
-            for screen in live saved session day settings; do
+            for screen in live transcript saved search session day settings; do
+              case $screen in transcript) q=medication ;; search) q=budget ;; *) q="" ;; esac
               xcrun simctl terminate "$UDID" com.talljamz2.LiveCaptions 2>/dev/null || true
-              xcrun simctl launch "$UDID" com.talljamz2.LiveCaptions -demo YES -screen $screen -appearance $appearance
+              xcrun simctl launch "$UDID" com.talljamz2.LiveCaptions -demo YES -screen $screen -demoQuery "$q" -appearance $appearance
               sleep 6
               xcrun simctl io "$UDID" screenshot "shots/$screen-$appearance.png"
             done

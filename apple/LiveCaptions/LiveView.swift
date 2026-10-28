@@ -6,6 +6,7 @@ struct LiveView: View {
     @AppStorage(SettingsKey.captionSize) private var captionSize: Double = 32
     @AppStorage(SettingsKey.captionFont) private var captionFont: CaptionFont = .newYork
     @AppStorage(SettingsKey.appearance) private var appearance: AppearanceMode = .system
+    @State private var showTranscript = false
 
     /// Newest first: the words being spoken right now at the top, then each earlier sentence
     /// below it. Only the live view is reversed; saved transcripts read in normal order.
@@ -55,6 +56,17 @@ struct LiveView: View {
                 .padding(.bottom, 14)
         }
         .background(Theme.canvas)
+        .sheet(isPresented: $showTranscript) {
+            TranscriptSearchView(session: controller.current, initialQuery: demoFind)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                #if os(macOS)
+                .frame(minWidth: 520, minHeight: 560)
+                #endif
+        }
+        #if DEBUG
+        .onAppear { if DemoData.screen == "transcript" { showTranscript = true } }
+        #endif
     }
 
     // MARK: - Captions
@@ -90,6 +102,17 @@ struct LiveView: View {
         HStack(spacing: 12) {
             status
             Spacer(minLength: 8)
+            Button {
+                showTranscript = true
+            } label: {
+                Image(systemName: "text.magnifyingglass")
+                    .font(.system(size: 17, weight: .regular))
+                    .frame(width: 36, height: 36)
+                    .background(Theme.card, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(controller.current == nil)
+            .accessibilityLabel("Full transcript and search")
             Button {
                 withAnimation(.easeInOut(duration: 0.25)) {
                     appearance = colorScheme == .dark ? .light : .dark
@@ -155,6 +178,14 @@ struct LiveView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
+    }
+
+    private var demoFind: String {
+        #if DEBUG
+        DemoData.query ?? ""
+        #else
+        ""
+        #endif
     }
 
     private var isPreparing: Bool {

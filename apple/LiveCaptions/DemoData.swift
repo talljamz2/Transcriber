@@ -7,9 +7,33 @@ import SwiftUI
 /// Debug builds only; the data lives in memory and is never saved.
 enum DemoData {
     static var isEnabled: Bool { UserDefaults.standard.bool(forKey: "demo") }
+    /// Which screen to open in demo mode.
+    static var screen: String? { isEnabled ? UserDefaults.standard.string(forKey: "screen") : nil }
+    /// A search to show in demo mode.
+    static var query: String? { isEnabled ? UserDefaults.standard.string(forKey: "demoQuery") : nil }
+
+    struct Seeded {
+        let today: Date
+        let meeting: CaptionSession
+        let live: CaptionSession
+        let liveVolatile = "If you have any questions you can call the"
+    }
 
     @MainActor
     static func load(into context: ModelContext, controller: CaptionController, tab: inout Int, path: inout NavigationPath) {
+        let seeded = seed(into: context, controller: controller)
+        switch screen ?? "live" {
+        case "saved", "search": tab = 1
+        case "day": tab = 1; path.append(SavedRoute.day(seeded.today))
+        case "session": tab = 1; path.append(seeded.meeting)
+        case "settings": tab = 2
+        default: controller.showDemoLive(seeded.live, volatile: seeded.liveVolatile)
+        }
+    }
+
+    /// Inserts the sample sessions. Also used by the Xcode previews.
+    @MainActor
+    static func seed(into context: ModelContext, controller: CaptionController) -> Seeded {
         let cal = Calendar.current
         let today = cal.startOfDay(for: .now)
         let yesterday = cal.date(byAdding: .day, value: -1, to: today)!
@@ -91,19 +115,18 @@ enum DemoData {
         let live = CaptionSession(localeIdentifier: "en-US")
         let now = Date.now
         live.segments = [
+            Segment(time: now.addingTimeInterval(-300), text: "Good morning. Have a seat, the doctor will be with you shortly."),
+            Segment(time: now.addingTimeInterval(-240), text: "Are you still taking the blood pressure medication we started in June?"),
+            Segment(time: now.addingTimeInterval(-200), text: "Any dizziness or headaches since then?"),
+            Segment(time: now.addingTimeInterval(-160), text: "Okay, and how has your sleep been?"),
+            Segment(time: now.addingTimeInterval(-120), text: "Let's take your blood pressure again before we finish."),
             Segment(time: now.addingTimeInterval(-40), text: "Thanks for coming in today. I've had a look at your results from last week."),
             Segment(time: now.addingTimeInterval(-28), text: "Overall things look good. Your blood pressure is down since the last visit."),
             Segment(time: now.addingTimeInterval(-9), text: "I'd like you to keep taking the medication twice a day with food,"),
             Segment(time: now.addingTimeInterval(-1), text: "and we'll check again in about six weeks."),
         ]
 
-        switch UserDefaults.standard.string(forKey: "screen") ?? "live" {
-        case "saved": tab = 1
-        case "day": tab = 1; path.append(SavedRoute.day(today))
-        case "session": tab = 1; path.append(meeting)
-        case "settings": tab = 2
-        default: controller.showDemoLive(live, volatile: "If you have any questions you can call the")
-        }
+        return Seeded(today: today, meeting: meeting, live: live)
     }
 
     @MainActor
