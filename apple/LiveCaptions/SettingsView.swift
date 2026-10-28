@@ -61,7 +61,7 @@ struct SettingsView: View {
     }
 
     private func loadLanguages() async {
-        let locales = (try? await SpeechTranscriber.supportedLocales) ?? []
+        let locales = await SpeechTranscriber.supportedLocales
         languages = locales
             .map { locale in
                 let id = locale.identifier(.bcp47)

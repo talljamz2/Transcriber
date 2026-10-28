@@ -86,7 +86,7 @@ final class LiveTranscriber {
         guard SpeechTranscriber.isAvailable else { throw CaptionError.unsupportedDevice }
 
         let wanted = localeIdentifier.isEmpty ? Locale.current : Locale(identifier: localeIdentifier)
-        guard let locale = try? await SpeechTranscriber.supportedLocale(equivalentTo: wanted) else {
+        guard let locale = await SpeechTranscriber.supportedLocale(equivalentTo: wanted) else {
             let name = Locale.current.localizedString(forIdentifier: wanted.identifier) ?? wanted.identifier
             throw CaptionError.unsupportedLanguage(name)
         }
@@ -108,12 +108,12 @@ final class LiveTranscriber {
         phase = .preparing("Starting microphone…")
         #if os(iOS)
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.record, mode: .default, options: [.allowBluetooth])
+        try session.setCategory(.record, mode: .default, options: [.allowBluetoothHFP])
         try session.setActive(true, options: .notifyOthersOnDeactivation)
         #endif
 
         guard engine.inputNode.outputFormat(forBus: 0).sampleRate > 0 else { throw CaptionError.noMicrophone }
-        guard let format = try? await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else {
+        guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else {
             throw CaptionError.noAudioFormat
         }
 
@@ -145,7 +145,7 @@ final class LiveTranscriber {
         resultsTask?.cancel()
         resultsTask = nil
         if let analyzer {
-            try? await analyzer.cancelAndFinishNow()
+            await analyzer.cancelAndFinishNow()
         }
         analyzer = nil
         feeder?.finish()
