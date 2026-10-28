@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Live Captions</title>
+  <meta name="description" content="Live speech-to-text captions with saved, summarized transcripts.">
+  <meta name="theme-color" content="#0f1115">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Live Captions</h1>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-view="live" role="tab" aria-selected="true">Live</button>
+      <button class="tab" data-view="history" role="tab" aria-selected="false">Saved</button>
+      <button class="tab" data-view="settings" role="tab" aria-selected="false">Settings</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- LIVE -->
+    <section id="view-live" class="view active" aria-label="Live captions">
+      <div id="unsupported" class="notice error" hidden>
+        Speech recognition isn't available in this browser. Use Chrome or Edge on Android, Windows, Mac or Linux,
+        or Safari on iPhone/iPad/Mac.
+      </div>
+      <div id="status" class="status" role="status" aria-live="polite">Tap Start to begin captioning.</div>
+
+      <div id="captions" class="captions" aria-live="off">
+        <p class="placeholder">Words spoken around you will appear here.</p>
+      </div>
+      <button id="jump-latest" class="jump" hidden>↓ Jump to latest</button>
+
+      <div class="controls">
+        <button id="btn-smaller" class="icon-btn" aria-label="Smaller text">A−</button>
+        <button id="btn-toggle" class="primary">Start</button>
+        <button id="btn-larger" class="icon-btn" aria-label="Larger text">A+</button>
+      </div>
+    </section>
+
+    <!-- HISTORY -->
+    <section id="view-history" class="view" aria-label="Saved transcripts">
+      <div id="history-list" class="history-list"></div>
+      <article id="session-detail" class="session-detail" hidden>
+        <button id="btn-back" class="link">← All transcripts</button>
+        <h2 id="detail-title"></h2>
+        <p id="detail-meta" class="meta"></p>
+        <div class="detail-actions">
+          <button id="btn-summarize">Summarize again</button>
+          <button id="btn-copy">Copy</button>
+          <button id="btn-download">Download .txt</button>
+          <button id="btn-delete" class="danger">Delete</button>
+        </div>
+        <h3>Summary</h3>
+        <div id="detail-summary" class="summary"></div>
+        <h3>Full transcript</h3>
+        <div id="detail-transcript" class="transcript"></div>
+      </article>
+    </section>
+
+    <!-- SETTINGS -->
+    <section id="view-settings" class="view" aria-label="Settings">
+      <form id="settings-form" class="settings" onsubmit="return false">
+        <label>Spoken language
+          <select id="set-lang"></select>
+        </label>
+
+        <label>Caption text size
+          <input id="set-size" type="range" min="18" max="72" step="2">
+          <span id="set-size-val" class="meta"></span>
+        </label>
+
+        <label class="check"><input id="set-wakelock" type="checkbox"> Keep screen on while captioning</label>
+        <label class="check"><input id="set-autosum" type="checkbox"> Summarize automatically when I stop</label>
+
+        <fieldset>
+          <legend>AI summaries (optional)</legend>
+          <p class="meta">
+            With an Anthropic API key, summaries are written by Claude. Without one, the app makes a basic
+            summary on your device. Your key is stored only in this browser. Get one at
+            <a href="https://console.anthropic.com/" target="_blank" rel="noopener">console.anthropic.com</a>.
+          </p>
+          <label>Anthropic API key
+            <input id="set-key" type="password" autocomplete="off" placeholder="sk-ant-...">
+          </label>
+          <label>Model
+            <select id="set-model">
+              <option value="claude-opus-5-5">Claude Opus 5.5 (best quality)</option>
+              <option value="claude-sonnet-5-5">Claude Sonnet 5.5 (balanced)</option>
+              <option value="claude-haiku-5-5">Claude Haiku 5.5 (cheapest)</option>
+            </select>
+          </label>
+        </fieldset>
+
+        <p class="meta">
+          Microphone: the browser uses your device's default microphone. To use a headset or earbud mic,
+          connect it before pressing Start. Note: in Chrome and Edge, speech recognition audio is processed
+          by the browser vendor's servers.
+        </p>
+        <p id="saved-msg" class="meta" role="status"></p>
+      </form>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
