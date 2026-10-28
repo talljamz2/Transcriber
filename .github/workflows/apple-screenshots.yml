@@ -1,6 +1,9 @@
 name: Apple app screenshots
 
 on:
+  push:
+    branches: [apple-app]
+    paths: ["apple/**", ".github/workflows/apple-screenshots.yml"]
   workflow_dispatch:
 
 jobs:
