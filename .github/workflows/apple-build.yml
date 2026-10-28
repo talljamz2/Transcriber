@@ -1,0 +1,24 @@
+name: Build Apple app
+
+on:
+  push:
+    paths: ["apple/**", ".github/workflows/apple-build.yml"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-26
+    strategy:
+      fail-fast: false
+      matrix:
+        sdk: [iphoneos, macosx]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show Xcode version
+        run: xcodebuild -version
+      - name: Build (${{ matrix.sdk }}, unsigned)
+        working-directory: apple
+        run: |
+          xcodebuild -project LiveCaptions.xcodeproj -target LiveCaptions -sdk ${{ matrix.sdk }} \
+            -configuration Debug CODE_SIGNING_ALLOWED=NO build | tee build.log | grep -E "error:|warning:|BUILD" || true
+          grep -q "BUILD SUCCEEDED" build.log
