@@ -8,6 +8,7 @@ import UIKit
 enum SettingsKey {
     static let locale = "localeIdentifier"
     static let captionSize = "captionSize"
+    static let captionFont = "captionFont"
     static let keepAwake = "keepScreenOn"
     static let autoSummarize = "autoSummarize"
 }

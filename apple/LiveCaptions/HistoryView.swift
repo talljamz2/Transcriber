@@ -65,6 +65,7 @@ struct SessionDetailView: View {
     @Environment(CaptionController.self) private var controller
     @State private var confirmDelete = false
     @State private var copied = false
+    @AppStorage(SettingsKey.captionFont) private var captionFont: CaptionFont = .system
 
     var body: some View {
         ScrollView {
@@ -90,7 +91,7 @@ struct SessionDetailView: View {
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
-                        SummaryText(markdown: session.summary)
+                        SummaryText(markdown: session.summary, font: captionFont)
                         if session.summarySource == "apple" {
                             Text("Summary written on-device by Apple Intelligence.")
                                 .font(.footnote)
@@ -113,7 +114,7 @@ struct SessionDetailView: View {
                             }
                         }
                     }
-                    .font(.body)
+                    .font(captionFont.font(size: 17))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -177,6 +178,7 @@ struct SessionDetailView: View {
 /// Renders the small Markdown subset the summaries use: `##` headings, `-` bullets, and **bold**.
 struct SummaryText: View {
     let markdown: String
+    var font: CaptionFont = .system
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -184,6 +186,7 @@ struct SummaryText: View {
                 line(rawLine.trimmingCharacters(in: .whitespaces))
             }
         }
+        .font(font.font(size: 17))
         .frame(maxWidth: .infinity, alignment: .leading)
         .textSelection(.enabled)
     }
@@ -192,7 +195,7 @@ struct SummaryText: View {
     private func line(_ line: String) -> some View {
         if line.hasPrefix("#") {
             Text(inline(line.drop(while: { $0 == "#" }).trimmingCharacters(in: .whitespaces)))
-                .font(.headline)
+                .font(font.font(size: 18, weight: .semibold))
                 .padding(.top, 6)
         } else if let first = line.first, "-*•".contains(first), line.dropFirst().first == " " {
             HStack(alignment: .firstTextBaseline, spacing: 6) {

@@ -3,6 +3,7 @@ import SwiftUI
 struct LiveView: View {
     @Environment(CaptionController.self) private var controller
     @AppStorage(SettingsKey.captionSize) private var captionSize: Double = 32
+    @AppStorage(SettingsKey.captionFont) private var captionFont: CaptionFont = .system
 
     /// Finished text plus the words still being recognized, which are dimmed and flow on
     /// from the last sentence (or start a new paragraph after a pause) so nothing jumps.
@@ -40,7 +41,7 @@ struct LiveView: View {
                         Text(line.text)
                     }
                 }
-                .font(.system(size: captionSize, weight: .medium))
+                .font(captionFont.font(size: captionSize, weight: .medium))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding()
                 .textSelection(.enabled)

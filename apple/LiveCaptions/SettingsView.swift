@@ -4,6 +4,7 @@ import Speech
 struct SettingsView: View {
     @AppStorage(SettingsKey.locale) private var localeIdentifier = ""
     @AppStorage(SettingsKey.captionSize) private var captionSize: Double = 32
+    @AppStorage(SettingsKey.captionFont) private var captionFont: CaptionFont = .system
     @AppStorage(SettingsKey.keepAwake) private var keepAwake = true
     @AppStorage(SettingsKey.autoSummarize) private var autoSummarize = true
     @Environment(CaptionController.self) private var controller
@@ -26,7 +27,19 @@ struct SettingsView: View {
                 Text("Speech is recognized on this device. The first time you use a language, its speech model downloads once.")
             }
 
-            Section("Text size") {
+            Section("Text") {
+                Picker("Font", selection: $captionFont) {
+                    Section("Serif") {
+                        ForEach(CaptionFont.allCases.filter(\.isSerif)) { font in
+                            Text(font.name).font(font.font(size: 17)).tag(font)
+                        }
+                    }
+                    Section("Sans serif") {
+                        ForEach(CaptionFont.allCases.filter { !$0.isSerif }) { font in
+                            Text(font.name).font(font.font(size: 17)).tag(font)
+                        }
+                    }
+                }
                 Slider(value: $captionSize, in: 18...72, step: 2) {
                     Text("Caption text size")
                 } minimumValueLabel: {
@@ -35,7 +48,7 @@ struct SettingsView: View {
                     Text("A").font(.title)
                 }
                 Text("The quick brown fox jumps over the lazy dog.")
-                    .font(.system(size: captionSize, weight: .medium))
+                    .font(captionFont.font(size: captionSize, weight: .medium))
                     .lineLimit(2)
                     .minimumScaleFactor(0.5)
             }
