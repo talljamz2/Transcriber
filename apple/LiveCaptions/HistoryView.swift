@@ -244,7 +244,10 @@ struct SessionDetailView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
-            TextField("Title", text: $session.title)
+            TextField("Title", text: Binding(
+                get: { session.title },
+                set: { session.title = $0; session.titleChosenByUser = true }
+            ))
                 .font(captionFont.font(size: 28, weight: .semibold))
                 .textFieldStyle(.plain)
             Text("\(Format.dateTime(session.startedAt)) · \(Format.duration(session.duration)) · \(session.wordCount) words")

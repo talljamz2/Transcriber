@@ -39,8 +39,9 @@ With a free Apple ID, apps installed this way stop opening after **7 days**; jus
 
 ## Using it
 
-- **Live:** press **Start** (or the space bar on Mac). Words appear as they're spoken; grey text is still being recognized. **A− / A+** change the size.
-- **Everything is saved automatically** when you press **Stop**. In the background, Apple Intelligence sorts each session into a category (Conversation, Meeting, Voice note, Phone call, Lecture / talk, TV & media), writes a summary, and pulls out **actions**: yours, other people's, and unclear ones you can mark **Mine** or **Not mine**.
+- **Live:** press the red button (or the space bar on Mac) to start. The newest words are solid at the bottom; older text fades above. **Pause** (‖) stops listening without ending the session, **▶** resumes, and **■** ends and saves it. The magnifier opens the full transcript with Find. **A− / A+** change the size.
+- **Action Button (iPhone 15 Pro and later):** go to **Settings → Action Button**, choose **Shortcut**, and pick **Live Captions → Quiet recording**. Press it to start recording quietly in the background, even with the phone locked; press again to end and save. The Lock Screen and Dynamic Island show the latest words with Pause and End buttons. Open the app once first so it can ask for microphone access and download the speech model.
+- **Everything is saved automatically** when you press **Stop**. In the background, Apple Intelligence gives each session a title, sorts it into a category (Conversation, Meeting, Voice note, Phone call, Lecture / talk, TV & media), writes a summary, and pulls out **actions**: yours, other people's, and unclear ones you can mark **Mine** or **Not mine**.
 - **Saved** is grouped by day. Each day has a **Daily summary**: a short recap, every action from the day, and each session in one line. TV & media is left out.
 - **Tidy up:** sessions that look like TV or media are flagged for review. Delete them or keep them; nothing is ever deleted automatically. TV & media sessions aren't summarized unless you tap **Summarize**.
 - **Evening reminder** (Settings): one notification on days with a summary to read or sessions to tidy up.

@@ -94,6 +94,10 @@ final class CaptionSession {
     var reviewed: Bool = false
     /// Set when the user picks the category themselves, so reprocessing doesn't overwrite it.
     var categoryChosenByUser: Bool = false
+    /// Set once Apple Intelligence has written the title (until then it's the first few words).
+    var hasSmartTitle: Bool = false
+    /// Set when the user renames the session, so it's never retitled.
+    var titleChosenByUser: Bool = false
 
     init(localeIdentifier: String) {
         self.localeIdentifier = localeIdentifier

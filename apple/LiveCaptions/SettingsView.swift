@@ -35,7 +35,7 @@ struct SettingsView: View {
                         Text(language.name).tag(language.id)
                     }
                 }
-                .disabled(controller.isRecording)
+                .disabled(controller.isSessionActive)
             } header: {
                 Text("Captions")
             } footer: {

@@ -37,15 +37,28 @@ final class CaptionController {
     #endif
 
     var isRecording: Bool { transcriber.phase == .listening }
+    /// A session has started and not ended: recording, or paused.
+    var isSessionActive: Bool { isRecording || isPaused }
+    private(set) var isPaused = false
+
+    /// The app's controller, for App Intents (Action Button, Live Activity buttons) that run without a view.
+    static weak var shared: CaptionController?
 
     init(context: ModelContext) {
         self.context = context
         transcriber.onFinal = { [weak self] text in self?.append(text) }
+        CaptionController.shared = self
+        RecordingControls.pause = { await CaptionController.shared?.pause() }
+        RecordingControls.resume = { await CaptionController.shared?.resume() }
+        RecordingControls.end = { await CaptionController.shared?.end() }
     }
 
     // MARK: - Recording
 
-    func start() async {
+    /// Starts a new session. `quietly` is used by the Action Button: no screen is kept awake,
+    /// and the session runs in the background with a Live Activity on the Lock Screen.
+    func start(quietly: Bool = false) async {
+        guard !isSessionActive else { return }
         errorMessage = nil
         let localeID = UserDefaults.standard.string(forKey: SettingsKey.locale) ?? ""
         current = CaptionSession(localeIdentifier: localeID)
@@ -53,7 +66,10 @@ final class CaptionController {
             try await transcriber.start(localeIdentifier: localeID)
             current?.startedAt = .now
             status = "Listening…"
-            setKeepAwake(UserDefaults.standard.object(forKey: SettingsKey.keepAwake) as? Bool ?? true)
+            if !quietly {
+                setKeepAwake(UserDefaults.standard.object(forKey: SettingsKey.keepAwake) as? Bool ?? true)
+            }
+            RecordingActivity.start(startedAt: .now, quietly: quietly)
         } catch {
             current = nil
             errorMessage = error.localizedDescription
@@ -61,13 +77,42 @@ final class CaptionController {
         }
     }
 
-    func stop() async {
+    /// Stops listening but keeps the session open, so it can be resumed.
+    func pause() async {
+        guard isRecording else { return }
         await transcriber.stop()
+        isPaused = true
         setKeepAwake(false)
+        status = "Paused"
+        save()
+        RecordingActivity.update(latest: current?.segments.last?.text ?? "", paused: true)
+    }
+
+    func resume() async {
+        guard isPaused, let session = current else { return }
+        errorMessage = nil
+        do {
+            try await transcriber.start(localeIdentifier: session.localeIdentifier)
+            isPaused = false
+            status = "Listening…"
+            setKeepAwake(UserDefaults.standard.object(forKey: SettingsKey.keepAwake) as? Bool ?? true)
+            RecordingActivity.update(latest: session.segments.last?.text ?? "", paused: false)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Ends the session: saves it and sorts and summarizes it in the background.
+    func end() async {
+        guard isSessionActive else { return }
+        if isRecording { await transcriber.stop() }
+        isPaused = false
+        setKeepAwake(false)
+        RecordingActivity.end()
         guard let session = current else { return }
 
         if session.segments.isEmpty {
-            status = "Stopped. Nothing was captured, so nothing was saved."
+            status = "Ended. Nothing was captured, so nothing was saved."
             return
         }
         session.endedAt = .now
@@ -85,6 +130,7 @@ final class CaptionController {
         session.segments.append(Segment(time: .now, text: text))
         session.endedAt = .now
         if session.title.isEmpty { session.title = CaptionSession.makeTitle(from: text) }
+        RecordingActivity.update(latest: text, paused: false)
     }
 
     // MARK: - Background processing
@@ -100,7 +146,25 @@ final class CaptionController {
         for session in (try? context.fetch(descriptor)) ?? [] where !isLive(session) {
             enqueue(session)
         }
+        retitleOlderSessions()
         Task { await EveningReminder.update(context: context) }
+    }
+
+    /// Sessions saved before smart titles get one, quietly, one at a time.
+    private func retitleOlderSessions() {
+        let done = ProcessingState.done.rawValue
+        let descriptor = FetchDescriptor<CaptionSession>(
+            predicate: #Predicate { $0.processingRaw == done && !$0.hasSmartTitle && !$0.titleChosenByUser },
+            sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+        )
+        let sessions = (try? context.fetch(descriptor)) ?? []
+        guard !sessions.isEmpty else { return }
+        Task { [weak self] in
+            for session in sessions where !session.isDeleted {
+                await SessionProcessor.retitle(session)
+                self?.save()
+            }
+        }
     }
 
     /// Re-summarizes a session in full (also used for TV & media sessions on request).
@@ -172,7 +236,7 @@ final class CaptionController {
     }
 
     func isLive(_ session: CaptionSession) -> Bool {
-        isRecording && current?.id == session.id
+        isSessionActive && current?.id == session.id
     }
 
     private func changed() {

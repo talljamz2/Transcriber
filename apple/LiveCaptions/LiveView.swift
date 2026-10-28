@@ -152,6 +152,9 @@ struct LiveView: View {
             } else if controller.isRecording {
                 Circle().fill(Theme.record).frame(width: 8, height: 8)
                 Text("Live").fontWeight(.semibold)
+            } else if controller.isPaused {
+                Image(systemName: "pause.fill").foregroundStyle(.secondary)
+                Text("Paused · tap ▶ to resume or ■ to end").foregroundStyle(.secondary)
             } else {
                 Text(controller.status).foregroundStyle(.secondary)
             }
@@ -168,11 +171,30 @@ struct LiveView: View {
                 captionSize = max(18, captionSize - 4)
             }
             Spacer()
-            RecordButton(isRecording: controller.isRecording, isBusy: isPreparing) {
-                Task {
-                    if controller.isRecording { await controller.stop() } else { await controller.start() }
+            HStack(spacing: 22) {
+                if controller.isSessionActive {
+                    Button {
+                        Task {
+                            if controller.isPaused { await controller.resume() } else { await controller.pause() }
+                        }
+                    } label: {
+                        Image(systemName: controller.isPaused ? "play.fill" : "pause.fill")
+                            .font(.system(size: 22))
+                            .frame(width: 58, height: 58)
+                            .background(Theme.card, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isPreparing)
+                    .accessibilityLabel(controller.isPaused ? "Resume" : "Pause")
+                    .transition(.scale.combined(with: .opacity))
+                }
+                RecordButton(isRecording: controller.isSessionActive, isBusy: isPreparing) {
+                    Task {
+                        if controller.isSessionActive { await controller.end() } else { await controller.start() }
+                    }
                 }
             }
+            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: controller.isSessionActive)
             Spacer()
             sizeButton("textformat.size.larger", label: "Larger text") {
                 captionSize = min(72, captionSize + 4)
@@ -228,6 +250,6 @@ struct RecordButton: View {
         .buttonStyle(.plain)
         .disabled(isBusy)
         .keyboardShortcut(.space, modifiers: [])
-        .accessibilityLabel(isRecording ? "Stop" : "Start captioning")
+        .accessibilityLabel(isRecording ? "End and save" : "Start captioning")
     }
 }

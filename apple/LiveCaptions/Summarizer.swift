@@ -15,6 +15,8 @@ enum GeneratedCategory {
 
 @Generable
 struct GeneratedClassification {
+    @Guide(description: "A short title of 2 to 6 words, like a calendar entry or a note's title. Name the subject, not the first words said. For example: 'Q3 budget review', 'Doctor's appointment', 'Leafs vs. Canadiens', 'Plumber and grocery reminders'.")
+    var title: String
     @Guide(description: "The kind of recording.")
     var category: GeneratedCategory
     @Guide(description: "What the recording is, in under 12 words. For example: 'Hockey game commentary', 'Team meeting about the Q3 budget', 'Note about groceries and calling the plumber'.")
@@ -111,10 +113,11 @@ enum SessionProcessor {
         session.processing = .processing
         let text = session.transcriptText(withTimes: false)
         do {
-            if session.category == nil || session.oneLiner.isEmpty {
+            if session.category == nil || session.oneLiner.isEmpty || !session.hasSmartTitle {
                 let result = try await classify(text)
                 if !session.categoryChosenByUser { session.category = SessionCategory(result.category) }
                 session.oneLiner = result.label
+                applyTitle(result.title, to: session)
             }
             if session.category?.isLowValue == true && !full {
                 session.processing = .done
@@ -159,6 +162,22 @@ enum SessionProcessor {
         } catch {
             return (basicDayBrief(sessions), [])
         }
+    }
+
+    /// Gives a session that was saved before smart titles a proper title, without re-summarizing it.
+    static func retitle(_ session: CaptionSession) async {
+        guard isAvailable, !session.segments.isEmpty, !session.hasSmartTitle else { return }
+        if let result = try? await classify(session.transcriptText(withTimes: false)) {
+            applyTitle(result.title, to: session)
+            if session.oneLiner.isEmpty { session.oneLiner = result.label }
+        }
+    }
+
+    private static func applyTitle(_ title: String, to session: CaptionSession) {
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "\"'.")))
+        guard !title.isEmpty else { return }
+        if !session.titleChosenByUser { session.title = title }
+        session.hasSmartTitle = true
     }
 
     // MARK: Classification

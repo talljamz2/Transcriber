@@ -137,6 +137,7 @@ enum DemoData {
     ) -> CaptionSession {
         let s = CaptionSession(localeIdentifier: "en-US")
         s.title = title
+        s.hasSmartTitle = true
         s.startedAt = start
         s.endedAt = start.addingTimeInterval(minutes * 60)
         let step = minutes * 60 / Double(max(lines.count, 1))
