@@ -4,8 +4,9 @@ import Speech
 struct SettingsView: View {
     @AppStorage(SettingsKey.locale) private var localeIdentifier = ""
     @AppStorage(SettingsKey.captionSize) private var captionSize: Double = 32
-    @AppStorage(SettingsKey.captionFont) private var captionFont: CaptionFont = .system
+    @AppStorage(SettingsKey.captionFont) private var captionFont: CaptionFont = .newYork
     @AppStorage(SettingsKey.keepAwake) private var keepAwake = true
+    @AppStorage(SettingsKey.appearance) private var appearance: AppearanceMode = .system
     @AppStorage(SettingsKey.eveningReminder) private var eveningReminder = true
     @AppStorage(SettingsKey.reminderMinutes) private var reminderMinutes = 20 * 60
     @Environment(CaptionController.self) private var controller
@@ -14,6 +15,19 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            Section {
+                Picker("Appearance", selection: $appearance) {
+                    ForEach(AppearanceMode.allCases) { mode in
+                        Text(mode.name).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+            } header: {
+                Text("Appearance")
+            } footer: {
+                Text("Automatic follows your device. You can also switch with the moon and sun button on the Live screen.")
+            }
+
             Section {
                 Picker("Spoken language", selection: $localeIdentifier) {
                     Text("Same as device").tag("")
@@ -49,7 +63,7 @@ struct SettingsView: View {
                     Text("A").font(.title)
                 }
                 Text("The quick brown fox jumps over the lazy dog.")
-                    .font(captionFont.font(size: captionSize, weight: .medium))
+                    .font(captionFont.font(size: captionSize))
                     .lineLimit(2)
                     .minimumScaleFactor(0.5)
             }

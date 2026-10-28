@@ -5,7 +5,7 @@ import SwiftData
 struct DayView: View {
     let day: Date
     @Environment(CaptionController.self) private var controller
-    @AppStorage(SettingsKey.captionFont) private var captionFont: CaptionFont = .system
+    @AppStorage(SettingsKey.captionFont) private var captionFont: CaptionFont = .newYork
     @Query private var sessions: [CaptionSession]
     @Query private var summaries: [DaySummary]
 
@@ -29,7 +29,7 @@ struct DayView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(Format.day(day)).font(.largeTitle.bold())
+                    Text(Format.day(day)).font(captionFont.font(size: 34, weight: .semibold))
                     Text(day.formatted(date: .complete, time: .omitted)).foregroundStyle(.secondary)
                     Text(DayStats(useful).description.capitalizedFirst).foregroundStyle(.secondary)
                 }
@@ -67,11 +67,11 @@ struct DayView: View {
                     session.actions.map { ActionEntry(session: session, action: $0) }
                 }
                 if !entries.isEmpty {
-                    Text("Actions").font(.title3.bold())
+                    SectionTitle("Actions")
                     ActionsList(entries: entries)
                 }
 
-                Text("Sessions").font(.title3.bold())
+                SectionTitle("Sessions")
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(useful) { session in
                         NavigationLink(value: session) {
@@ -85,8 +85,11 @@ struct DayView: View {
                     }
                 }
             }
-            .padding()
+            .padding(20)
+            .frame(maxWidth: 760)
+            .frame(maxWidth: .infinity)
         }
+        .background(Theme.canvas)
         .navigationTitle("Daily summary")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)

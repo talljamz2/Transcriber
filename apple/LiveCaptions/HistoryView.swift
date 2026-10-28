@@ -141,7 +141,7 @@ struct SessionDetailView: View {
     @Environment(CaptionController.self) private var controller
     @State private var confirmDelete = false
     @State private var copied = false
-    @AppStorage(SettingsKey.captionFont) private var captionFont: CaptionFont = .system
+    @AppStorage(SettingsKey.captionFont) private var captionFont: CaptionFont = .newYork
 
     private var isLive: Bool { controller.isLive(session) }
     private var isWorking: Bool { controller.isQueued(session) }
@@ -161,11 +161,11 @@ struct SessionDetailView: View {
                 }
 
                 if !session.actions.isEmpty {
-                    Text("Actions").font(.title3.bold())
+                    SectionTitle("Actions")
                     ActionsList(entries: session.actions.map { ActionEntry(session: session, action: $0) }, showSource: false)
                 }
 
-                Text("Summary").font(.title3.bold())
+                SectionTitle("Summary")
                 GroupBox { summaryContent }
 
                 if !session.topics.isEmpty {
@@ -176,7 +176,7 @@ struct SessionDetailView: View {
 
                 buttons
 
-                Text("Full transcript").font(.title3.bold())
+                SectionTitle("Full transcript")
                 GroupBox {
                     LazyVStack(alignment: .leading, spacing: 10) {
                         ForEach(session.segments) { segment in
@@ -193,8 +193,11 @@ struct SessionDetailView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .padding()
+            .padding(20)
+            .frame(maxWidth: 760)
+            .frame(maxWidth: .infinity)
         }
+        .background(Theme.canvas)
         .navigationTitle(session.displayTitle)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -212,7 +215,7 @@ struct SessionDetailView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
             TextField("Title", text: $session.title)
-                .font(.title2.bold())
+                .font(captionFont.font(size: 28, weight: .semibold))
                 .textFieldStyle(.plain)
             Text("\(Format.dateTime(session.startedAt)) · \(Format.duration(session.duration)) · \(session.wordCount) words")
                 .foregroundStyle(.secondary)
@@ -250,7 +253,6 @@ struct SessionDetailView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .backgroundStyle(.orange.opacity(0.12))
     }
 
     @ViewBuilder
@@ -321,7 +323,7 @@ struct SessionDetailView: View {
 /// Renders the small Markdown subset the summaries use: `##` headings, `-` bullets, and **bold**.
 struct SummaryText: View {
     let markdown: String
-    var font: CaptionFont = .system
+    var font: CaptionFont = .newYork
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -357,4 +359,18 @@ struct SummaryText: View {
 
 extension String {
     var capitalizedFirst: String { prefix(1).uppercased() + dropFirst() }
+}
+
+/// A quiet section heading, like those in Apple's own apps.
+struct SectionTitle: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text.uppercased())
+            .font(.footnote.weight(.semibold))
+            .tracking(0.6)
+            .foregroundStyle(.secondary)
+            .padding(.top, 8)
+    }
 }

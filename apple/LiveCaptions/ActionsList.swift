@@ -45,7 +45,7 @@ struct ActionRow: View {
     let entry: ActionEntry
     let showSource: Bool
     @Environment(CaptionController.self) private var controller
-    @AppStorage(SettingsKey.captionFont) private var captionFont: CaptionFont = .system
+    @AppStorage(SettingsKey.captionFont) private var captionFont: CaptionFont = .newYork
 
     private var action: ActionItem { entry.action }
 

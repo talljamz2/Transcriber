@@ -9,6 +9,7 @@ enum SettingsKey {
     static let locale = "localeIdentifier"
     static let captionSize = "captionSize"
     static let captionFont = "captionFont"
+    static let appearance = "appearance"
     static let keepAwake = "keepScreenOn"
     static let eveningReminder = "eveningReminder"
     /// Minutes after midnight, e.g. 1200 for 8:00 PM.

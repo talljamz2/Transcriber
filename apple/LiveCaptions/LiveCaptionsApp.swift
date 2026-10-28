@@ -32,6 +32,7 @@ struct LiveCaptionsApp: App {
 struct ContentView: View {
     @Environment(CaptionController.self) private var controller
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage(SettingsKey.appearance) private var appearance: AppearanceMode = .system
 
     var body: some View {
         TabView {
@@ -45,6 +46,8 @@ struct ContentView: View {
                 NavigationStack { SettingsView() }
             }
         }
+        .groupBoxStyle(.card)
+        .preferredColorScheme(appearance.colorScheme)
         .task { controller.resumePendingWork() }
         .onChange(of: scenePhase) {
             if scenePhase == .active { Task { await controller.refreshReminder() } }
