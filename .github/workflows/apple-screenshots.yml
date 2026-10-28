@@ -6,6 +6,9 @@ on:
     paths: ["apple/**", ".github/workflows/apple-screenshots.yml"]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   screenshots:
     runs-on: macos-26
@@ -39,7 +42,11 @@ jobs:
             done
           done
           ls -la shots
-      - uses: actions/upload-artifact@v4
-        with:
-          name: screenshots
-          path: apple/shots
+      - name: Publish to the screenshots branch
+        run: |
+          cd apple/shots
+          git init -q -b screenshots
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add . && git commit -q -m "Screenshots for ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" screenshots
