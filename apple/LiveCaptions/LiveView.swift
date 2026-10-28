@@ -4,8 +4,22 @@ struct LiveView: View {
     @Environment(CaptionController.self) private var controller
     @AppStorage(SettingsKey.captionSize) private var captionSize: Double = 32
 
-    private var paragraphs: [CaptionParagraph] {
-        CaptionParagraph.group(controller.current?.segments ?? [])
+    /// Finished text plus the words still being recognized, which are dimmed and flow on
+    /// from the last sentence (or start a new paragraph after a pause) so nothing jumps.
+    private var lines: [(id: Int, text: AttributedString)] {
+        let segments = controller.current?.segments ?? []
+        var result = CaptionParagraph.group(segments).map { (id: $0.id, text: AttributedString($0.text)) }
+        let pending = controller.transcriber.volatileText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !pending.isEmpty else { return result }
+
+        var dimmed = AttributedString(pending)
+        dimmed.foregroundColor = .secondary
+        if let lastTime = segments.last?.time, Date.now.timeIntervalSince(lastTime) < 4, !result.isEmpty {
+            result[result.count - 1].text += AttributedString(" ") + dimmed
+        } else {
+            result.append((id: result.count, text: dimmed))
+        }
+        return result
     }
 
     var body: some View {
@@ -16,17 +30,14 @@ struct LiveView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: captionSize * 0.45) {
-                    if paragraphs.isEmpty && controller.transcriber.volatileText.isEmpty {
+                    let lines = lines
+                    if lines.isEmpty {
                         Text("Words spoken around you will appear here.")
                             .font(.title3)
                             .foregroundStyle(.secondary)
                     }
-                    ForEach(paragraphs) { paragraph in
-                        Text(paragraph.text)
-                    }
-                    if !controller.transcriber.volatileText.isEmpty {
-                        Text(controller.transcriber.volatileText)
-                            .foregroundStyle(.secondary)
+                    ForEach(lines, id: \.id) { line in
+                        Text(line.text)
                     }
                 }
                 .font(.system(size: captionSize, weight: .medium))

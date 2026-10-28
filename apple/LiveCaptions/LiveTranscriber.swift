@@ -96,7 +96,7 @@ final class LiveTranscriber {
         let transcriber = SpeechTranscriber(
             locale: locale,
             transcriptionOptions: [],
-            reportingOptions: [.volatileResults],
+            reportingOptions: [.volatileResults, .fastResults],
             attributeOptions: []
         )
 
@@ -133,6 +133,7 @@ final class LiveTranscriber {
             }
         }
 
+        try await analyzer.prepareToAnalyze(in: format)
         try await analyzer.start(inputSequence: stream)
 
         let feeder = AudioFeeder(continuation: continuation, outputFormat: format)
@@ -233,7 +234,7 @@ final class AudioFeeder: @unchecked Sendable {
             converter = AVAudioConverter(from: inputFormat, to: outputFormat)
             converter?.primeMethod = .none
         }
-        node.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
+        node.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buffer, _ in
             self?.process(buffer)
         }
     }
