@@ -7,22 +7,28 @@ struct LiveView: View {
     @AppStorage(SettingsKey.captionFont) private var captionFont: CaptionFont = .newYork
     @AppStorage(SettingsKey.appearance) private var appearance: AppearanceMode = .system
 
-    /// Finished text plus the words still being recognized, which are dimmed and flow on
-    /// from the last sentence (or start a new paragraph after a pause) so nothing jumps.
-    private var lines: [(id: Int, text: AttributedString)] {
-        let segments = controller.current?.segments ?? []
-        var result = CaptionParagraph.group(segments).map { (id: $0.id, text: AttributedString($0.text)) }
+    /// Newest first: the words being spoken right now at the top, then each earlier sentence
+    /// below it. Only the live view is reversed; saved transcripts read in normal order.
+    private var blocks: [(id: String, text: String)] {
+        var result: [(id: String, text: String)] = []
         let pending = controller.transcriber.volatileText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !pending.isEmpty else { return result }
-
-        var dimmed = AttributedString(pending)
-        dimmed.foregroundColor = .secondary
-        if let lastTime = segments.last?.time, Date.now.timeIntervalSince(lastTime) < 4, !result.isEmpty {
-            result[result.count - 1].text += AttributedString(" ") + dimmed
-        } else {
-            result.append((id: result.count, text: dimmed))
+        if !pending.isEmpty { result.append((id: "pending", text: pending)) }
+        let segments = controller.current?.segments ?? []
+        for segment in segments.reversed().prefix(60) {
+            result.append((id: segment.id.uuidString, text: segment.text))
         }
         return result
+    }
+
+    /// The newest words are full strength; older lines fade toward grey as they move down.
+    private func opacity(at index: Int, hasPending: Bool) -> Double {
+        let age = index - (hasPending ? 1 : 0)
+        switch age {
+        case ...0: return 1
+        case 1: return 0.62
+        case 2: return 0.45
+        default: return 0.34
+        }
     }
 
     var body: some View {
@@ -39,8 +45,8 @@ struct LiveView: View {
                     .padding(.horizontal, 24)
                     .padding(.vertical, 16)
             }
-            // Keep the newest words in view as the text grows.
-            .defaultScrollAnchor(.bottom, for: .sizeChanges)
+            // Newest words are at the top, so the view stays anchored there.
+            .defaultScrollAnchor(.top)
             .scrollIndicators(.hidden)
 
             controls
@@ -55,22 +61,25 @@ struct LiveView: View {
 
     @ViewBuilder
     private var captions: some View {
-        let lines = lines
-        if lines.isEmpty {
+        let blocks = blocks
+        if blocks.isEmpty {
             Text(controller.isRecording ? "Listening…" : "Tap the button below to start captioning.")
                 .font(captionFont.font(size: 22).italic())
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity, minHeight: 240, alignment: .center)
                 .multilineTextAlignment(.center)
         } else {
-            VStack(alignment: .leading, spacing: captionSize * 0.6) {
-                ForEach(lines, id: \.id) { line in
-                    Text(line.text)
+            let hasPending = blocks.first?.id == "pending"
+            VStack(alignment: .leading, spacing: captionSize * 0.5) {
+                ForEach(Array(blocks.enumerated()), id: \.element.id) { index, block in
+                    Text(block.text)
                         .lineSpacing(captionSize * 0.18)
+                        .opacity(opacity(at: index, hasPending: hasPending))
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             .font(captionFont.font(size: captionSize))
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .animation(.easeOut(duration: 0.35), value: blocks.count)
             .textSelection(.enabled)
         }
     }
