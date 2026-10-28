@@ -39,9 +39,14 @@ With a free Apple ID, apps installed this way stop opening after **7 days**; jus
 
 ## Using it
 
-- **Live:** press **Start** (or the space bar on Mac). Words appear as they're spoken; grey text is still being recognized and firms up a moment later. **A− / A+** change the size.
-- **Saved:** every session is saved when you press **Stop** and summarized automatically. Open one to read the summary and full transcript, rename it, summarize again, copy, share, or delete.
-- **Settings:** spoken language, text size, keep the screen on, automatic summaries.
+- **Live:** press **Start** (or the space bar on Mac). Words appear as they're spoken; grey text is still being recognized. **A− / A+** change the size.
+- **Everything is saved automatically** when you press **Stop**. In the background, Apple Intelligence sorts each session into a category (Conversation, Meeting, Voice note, Phone call, Lecture / talk, TV & media), writes a summary, and pulls out **actions**: yours, other people's, and unclear ones you can mark **Mine** or **Not mine**.
+- **Saved** is grouped by day. Each day has a **Daily summary**: a short recap, every action from the day, and each session in one line. TV & media is left out.
+- **Tidy up:** sessions that look like TV or media are flagged for review. Delete them or keep them; nothing is ever deleted automatically. TV & media sessions aren't summarized unless you tap **Summarize**.
+- **Evening reminder** (Settings): one notification on days with a summary to read or sessions to tidy up.
+- **Settings:** spoken language, font and text size, keep the screen on, reminder time.
+
+Only text is stored, never audio: an hour of conversation takes about 70 KB.
 
 The first time you use a language, the app downloads Apple's speech model for it (a short wait, one time only).
 
@@ -53,7 +58,8 @@ The first time you use a language, the app downloads Apple's speech model for it
 | --- | --- |
 | `LiveCaptionsApp.swift` | App entry point and tabs |
 | `LiveTranscriber.swift` | Microphone + SpeechAnalyzer live transcription |
-| `CaptionController.swift` | Recording sessions, saving, summarizing on stop |
-| `Summarizer.swift` | Apple Intelligence summaries (Foundation Models), with a basic fallback |
+| `CaptionController.swift` | Recording, saving, background processing queue, daily summaries |
+| `Summarizer.swift` | Apple Intelligence categories, summaries and actions (Foundation Models), with a basic fallback |
 | `Models.swift` | Saved session data (SwiftData) and formatting |
-| `LiveView.swift`, `HistoryView.swift`, `SettingsView.swift` | Screens |
+| `EveningReminder.swift` | The evening notification |
+| `LiveView.swift`, `HistoryView.swift`, `DayView.swift`, `TidyUpView.swift`, `ActionsList.swift`, `SettingsView.swift` | Screens |
