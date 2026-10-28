@@ -1,0 +1,42 @@
+name: Apple app screenshots
+
+on:
+  workflow_dispatch:
+
+jobs:
+  screenshots:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build for the iPhone Simulator
+        working-directory: apple
+        run: |
+          xcodebuild -project LiveCaptions.xcodeproj -target LiveCaptions -sdk iphonesimulator \
+            -configuration Debug CODE_SIGNING_ALLOWED=NO SYMROOT="$PWD/build" build | grep -E "error:|BUILD" || true
+          test -d build/Debug-iphonesimulator/LiveCaptions.app
+      - name: Take screenshots
+        working-directory: apple
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devs = [d for rt, ds in json.load(sys.stdin)["devices"].items() if "iOS" in rt for d in ds]
+          pick = next((d for d in devs if d["name"].endswith("Pro")), None) or next(d for d in devs if "iPhone" in d["name"])
+          print(pick["udid"])')
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl status_bar "$UDID" override --time 9:41 --batteryState charged --batteryLevel 100 --wifiBars 3 --cellularBars 4
+          xcrun simctl install "$UDID" build/Debug-iphonesimulator/LiveCaptions.app
+          mkdir -p shots
+          for appearance in light dark; do
+            for screen in live saved session day settings; do
+              xcrun simctl terminate "$UDID" com.talljamz2.LiveCaptions 2>/dev/null || true
+              xcrun simctl launch "$UDID" com.talljamz2.LiveCaptions -demo YES -screen $screen -appearance $appearance
+              sleep 6
+              xcrun simctl io "$UDID" screenshot "shots/$screen-$appearance.png"
+            done
+          done
+          ls -la shots
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: apple/shots

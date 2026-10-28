@@ -230,7 +230,7 @@ final class CaptionController {
         changed()
     }
 
-    private func fingerprint(_ sessions: [CaptionSession]) -> String {
+    func fingerprint(_ sessions: [CaptionSession]) -> String {
         sessions.map { "\($0.id.uuidString):\($0.summary.count):\($0.categoryRaw)" }.joined(separator: "|")
     }
 
@@ -260,3 +260,14 @@ final class CaptionController {
         #endif
     }
 }
+
+#if DEBUG
+extension CaptionController {
+    /// Shows a session on the Live tab as if it were being recorded, for screenshots.
+    func showDemoLive(_ session: CaptionSession, volatile: String) {
+        current = session
+        status = ""
+        transcriber.showDemo(volatile: volatile)
+    }
+}
+#endif

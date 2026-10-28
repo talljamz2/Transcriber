@@ -269,3 +269,13 @@ final class AudioFeeder: @unchecked Sendable {
         }
     }
 }
+
+#if DEBUG
+extension LiveTranscriber {
+    /// Puts the transcriber in a listening state with sample text, for screenshots.
+    func showDemo(volatile: String) {
+        phase = .listening
+        volatileText = volatile
+    }
+}
+#endif
