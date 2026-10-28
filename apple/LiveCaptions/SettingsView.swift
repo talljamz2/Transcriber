@@ -6,7 +6,8 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.captionSize) private var captionSize: Double = 32
     @AppStorage(SettingsKey.captionFont) private var captionFont: CaptionFont = .system
     @AppStorage(SettingsKey.keepAwake) private var keepAwake = true
-    @AppStorage(SettingsKey.autoSummarize) private var autoSummarize = true
+    @AppStorage(SettingsKey.eveningReminder) private var eveningReminder = true
+    @AppStorage(SettingsKey.reminderMinutes) private var reminderMinutes = 20 * 60
     @Environment(CaptionController.self) private var controller
 
     @State private var languages: [LanguageOption] = []
@@ -55,9 +56,17 @@ struct SettingsView: View {
 
             Section {
                 Toggle("Keep screen on while captioning", isOn: $keepAwake)
-                Toggle("Summarize automatically when I stop", isOn: $autoSummarize)
+            }
+
+            Section {
+                Toggle("Evening reminder", isOn: $eveningReminder)
+                if eveningReminder {
+                    DatePicker("Time", selection: reminderTime, displayedComponents: .hourAndMinute)
+                }
+            } header: {
+                Text("Summaries")
             } footer: {
-                Text(Summarizer.statusDescription)
+                Text("\(SessionProcessor.statusDescription) The reminder only appears on days with a summary to read or sessions to tidy up.")
             }
 
             Section("Microphone") {
@@ -71,6 +80,24 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .navigationTitle("Settings")
         .task { await loadLanguages() }
+        .onChange(of: eveningReminder) {
+            Task {
+                await EveningReminder.requestPermissionIfNeeded()
+                await controller.refreshReminder()
+            }
+        }
+        .onChange(of: reminderMinutes) {
+            Task { await controller.refreshReminder() }
+        }
+    }
+
+    private var reminderTime: Binding<Date> {
+        Binding {
+            Calendar.current.date(bySettingHour: reminderMinutes / 60, minute: reminderMinutes % 60, second: 0, of: .now) ?? .now
+        } set: { date in
+            let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
+            reminderMinutes = (parts.hour ?? 20) * 60 + (parts.minute ?? 0)
+        }
     }
 
     private func loadLanguages() async {

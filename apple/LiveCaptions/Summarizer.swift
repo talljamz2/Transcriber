@@ -1,74 +1,218 @@
 import Foundation
 import FoundationModels
 
-/// Summarizes transcripts with Apple Intelligence's on-device model, falling back to a
-/// simple word-frequency summary on devices without it.
+// MARK: - Shapes Apple Intelligence fills in
+
+@Generable
+enum GeneratedCategory {
+    case conversation
+    case meeting
+    case voiceNote
+    case phoneCall
+    case lecture
+    case media
+}
+
+@Generable
+struct GeneratedClassification {
+    @Guide(description: "The kind of recording.")
+    var category: GeneratedCategory
+    @Guide(description: "What the recording is, in under 12 words. For example: 'Hockey game commentary', 'Team meeting about the Q3 budget', 'Note about groceries and calling the plumber'.")
+    var label: String
+}
+
+@Generable
+enum GeneratedOwner {
+    case speakerSelf
+    case namedPerson
+    case unspecified
+}
+
+@Generable
+struct GeneratedAction {
+    @Guide(description: "The task, starting with a verb. For example: 'Send Sarah the revised budget'.")
+    var task: String
+    @Guide(description: "speakerSelf when a speaker says they will do it themselves ('I'll…', 'I will…', 'let me…', 'I need to…'); namedPerson when a specific person is named as responsible; otherwise unspecified.")
+    var owner: GeneratedOwner
+    @Guide(description: "The responsible person's name when owner is namedPerson, otherwise empty.")
+    var person: String
+    @Guide(description: "The deadline as said, for example 'by next Friday'. Empty if none.")
+    var due: String
+    @Guide(description: "The deadline as a date in YYYY-MM-DD format, worked out from the recording date. Empty if there is no deadline or it can't be worked out.")
+    var dueDate: String
+    @Guide(description: "The short phrase from the transcript this action comes from.")
+    var quote: String
+}
+
+@Generable
+struct GeneratedDigest {
+    @Guide(description: "Two to four sentences on what it was about.")
+    var overview: String
+    @Guide(description: "The main things said or learned.")
+    var keyPoints: [String]
+    @Guide(description: "Decisions that were made. Empty if none.")
+    var decisions: [String]
+    @Guide(description: "Every task, promise, request, reminder, or next step mentioned. Empty if none.")
+    var actions: [GeneratedAction]
+    @Guide(description: "One to five short topic keywords.")
+    var topics: [String]
+    @Guide(description: "Passages that look misrecognized, with a best guess at what was meant. Empty if none.")
+    var possiblyMisheard: [String]
+}
+
+@Generable
+struct GeneratedDayBrief {
+    @Guide(description: "Two to four sentences summarizing the person's day.")
+    var brief: String
+    @Guide(description: "Ideas or subjects that came up more than once or stood out. Empty if none.")
+    var themes: [String]
+}
+
+// MARK: - Processing
+
+/// Categorizes each session, summarizes it and pulls out actions, using Apple Intelligence on the
+/// device. Falls back to a basic word-frequency summary on devices without it.
 @MainActor
-enum Summarizer {
+enum SessionProcessor {
+    static var isAvailable: Bool {
+        if case .available = SystemLanguageModel.default.availability { return true }
+        return false
+    }
+
     static var statusDescription: String {
         switch SystemLanguageModel.default.availability {
         case .available:
-            return "Summaries are written on this device by Apple Intelligence."
+            return "Every session is sorted and summarized on this device by Apple Intelligence."
         case .unavailable(.deviceNotEligible):
-            return "This device doesn't support Apple Intelligence, so summaries use a basic on-device method."
+            return "This device doesn't support Apple Intelligence, so sessions get a basic summary and aren't sorted into categories."
         case .unavailable(.appleIntelligenceNotEnabled):
-            return "Turn on Apple Intelligence in Settings for better summaries. Until then, a basic on-device method is used."
+            return "Turn on Apple Intelligence in Settings so sessions can be sorted and summarized. Until then, a basic summary is used."
         case .unavailable(.modelNotReady):
-            return "Apple Intelligence is still getting ready (downloading). A basic summary is used until it's done."
+            return "Apple Intelligence is still downloading. Sessions will be sorted and summarized once it's ready."
         case .unavailable:
-            return "Apple Intelligence isn't available, so summaries use a basic on-device method."
+            return "Apple Intelligence isn't available, so sessions get a basic summary."
         }
     }
 
-    static func summarize(_ session: CaptionSession) async {
+    /// Fills in category, summary, actions and topics. TV & media sessions only get a category and a
+    /// one-line description unless `full` is set (the user asked for a summary).
+    static func process(_ session: CaptionSession, full: Bool = false) async {
         guard !session.segments.isEmpty else {
-            session.summary = "Nothing was captured in this session."
-            session.summarySource = ""
+            session.processing = .done
             return
         }
-        guard case .available = SystemLanguageModel.default.availability else {
+        guard isAvailable else {
             session.summary = BasicSummary.make(for: session)
             session.summarySource = "local"
+            session.processing = .done
             return
         }
+
+        session.processing = .processing
+        let text = session.transcriptText(withTimes: false)
         do {
-            let header = "Recorded \(Format.dateTime(session.startedAt)), lasting \(Format.duration(session.duration))."
-            session.summary = try await summarizeOnDevice(session.transcriptText(withTimes: false), header: header)
-            session.summarySource = "apple"
+            if session.category == nil || session.oneLiner.isEmpty {
+                let result = try await classify(text)
+                if !session.categoryChosenByUser { session.category = SessionCategory(result.category) }
+                session.oneLiner = result.label
+            }
+            if session.category?.isLowValue == true && !full {
+                session.processing = .done
+                return
+            }
+            let digest = try await summarize(text, session: session)
+            apply(digest, to: session)
+            session.processing = .done
         } catch {
             session.summary = BasicSummary.make(for: session)
                 + "\n\n## Note\nApple Intelligence couldn't summarize this transcript (\(error.localizedDescription)), so this is a basic summary."
             session.summarySource = "local"
+            session.processing = .failed
         }
     }
 
-    // MARK: - Apple Intelligence
+    /// A short overview of a day, built from its sessions' summaries.
+    static func summarizeDay(_ sessions: [CaptionSession]) async -> (brief: String, themes: [String]) {
+        guard isAvailable, !sessions.isEmpty else { return (basicDayBrief(sessions), []) }
 
-    private static let summaryInstructions = """
-    You summarize transcripts for a person with hearing loss who used live captions to follow a \
-    conversation, meeting, lecture, or appointment. The transcript came from automatic speech \
-    recognition: it has no speaker labels and may contain recognition errors. Infer the intended words \
-    where the context makes them clear, and never invent details.
+        func lines(detailed: Bool) -> String {
+            sessions.map { s in
+                var line = "• \(Format.time(s.startedAt)) — \(s.category?.name ?? "Recording"): \(s.oneLiner.isEmpty ? s.displayTitle : s.oneLiner)"
+                if detailed, !s.overview.isEmpty { line += ". \(s.overview.prefix(300))" }
+                return line
+            }.joined(separator: "\n")
+        }
+        var input = lines(detailed: true)
+        if input.count > 3500 { input = lines(detailed: false) }
+        if input.count > 3500 { input = String(input.prefix(3500)) }
 
-    Reply in the transcript's language using these Markdown sections, leaving out any that would be empty:
-    ## Overview
-    Two to four sentences on what it was about.
-    ## Key points
-    Bullets for the main things said or decided.
-    ## Action items & details to remember
-    Bullets for tasks, dates, times, names, numbers, places, and instructions.
-    ## Possibly misheard
-    Bullets for garbled passages where the meaning is uncertain, with your best guess.
+        do {
+            let session = LanguageModelSession(instructions: """
+            You write a short end-of-day recap for a person with hearing loss who records their meetings, \
+            conversations, lectures and voice notes. Write to them as "you". Never invent details.
+            """)
+            let result = try await session.respond(
+                to: "Here is what was recorded on \(Format.day(sessions[0].day)):\n\n\(input)",
+                generating: GeneratedDayBrief.self
+            ).content
+            return (result.brief, result.themes)
+        } catch {
+            return (basicDayBrief(sessions), [])
+        }
+    }
+
+    // MARK: Classification
+
+    private static let classifyInstructions = """
+    You sort transcripts made by live speech recognition (no speaker labels, some recognition errors) into one category:
+    - conversation: informal back-and-forth between people in person.
+    - meeting: an organized discussion about work, plans, or decisions, often with several people.
+    - voiceNote: one person talking to themselves: notes, reminders, ideas, to-dos, dictation, journaling.
+    - phoneCall: a phone or video call.
+    - lecture: one main speaker presenting to listeners: a class, talk, sermon, conference session, tour, or presentation.
+    - media: TV, film, sports commentary, news broadcasts, podcasts, radio, online videos, music, or ads.
     """
+
+    private static func classify(_ text: String) async throws -> GeneratedClassification {
+        let session = LanguageModelSession(instructions: classifyInstructions)
+        return try await session.respond(
+            to: "Transcript:\n\n\(sample(text, limit: 3000))",
+            generating: GeneratedClassification.self
+        ).content
+    }
+
+    /// The start, middle and end of a long transcript, enough to tell what kind of recording it is.
+    private static func sample(_ text: String, limit: Int) -> String {
+        guard text.count > limit else { return text }
+        let part = limit / 3
+        let midStart = text.index(text.startIndex, offsetBy: text.count / 2 - part / 2)
+        return "\(text.prefix(part)) … \(text[midStart...].prefix(part)) … \(text.suffix(part))"
+    }
+
+    // MARK: Summaries
+
+    private static func summaryInstructions(for session: CaptionSession) -> String {
+        var text = """
+        You summarize transcripts for a person with hearing loss who used live captions. The transcript came \
+        from automatic speech recognition: it has no speaker labels and may contain recognition errors. Infer \
+        the intended words where the context makes them clear, and never invent details. Be thorough about \
+        actions: include every promise ("I'll send it"), request ("can you…"), reminder, and next step, with \
+        any deadline. Write in the transcript's language.
+        """
+        if session.category == .voiceNote {
+            text += " This is the person's own voice note, so tasks mentioned are their own."
+        }
+        return text
+    }
 
     private static let notesInstructions = """
-    You condense part of a speech-recognition transcript into short bullet notes. Keep every task, \
-    date, time, name, number, place, and instruction. Never invent details.
+    You condense part of a speech-recognition transcript into short bullet notes. Keep every task, promise, \
+    request, deadline, date, time, name, number, place, and decision, and keep the exact wording of \
+    promises like "I'll do X by Friday". Never invent details.
     """
 
-    /// The on-device model has a small context window, so long transcripts are condensed in
-    /// parts first and the notes are then summarized.
-    private static func summarizeOnDevice(_ transcript: String, header: String, chunkSize: Int = 5000) async throws -> String {
+    /// The on-device model has a small context window, so long transcripts are condensed in parts first.
+    private static func summarize(_ transcript: String, session: CaptionSession, chunkSize: Int = 4000) async throws -> GeneratedDigest {
         do {
             var text = transcript
             var condensed = false
@@ -77,31 +221,81 @@ enum Summarizer {
                 let parts = chunks(of: text, size: chunkSize)
                 var notes: [String] = []
                 for (i, part) in parts.enumerated() {
-                    notes.append(try await respond(
-                        to: "Part \(i + 1) of \(parts.count):\n\n\(part)",
-                        instructions: notesInstructions
-                    ))
+                    let s = LanguageModelSession(instructions: notesInstructions)
+                    notes.append(try await s.respond(to: "Part \(i + 1) of \(parts.count):\n\n\(part)").content)
                 }
                 text = notes.joined(separator: "\n")
                 condensed = true
                 rounds += 1
             }
+            let header = """
+            Recorded on \(session.startedAt.formatted(.dateTime.weekday(.wide).day().month(.wide).year())) \
+            at \(Format.time(session.startedAt)), lasting \(Format.duration(session.duration)). \
+            Kind of recording: \(session.category?.name ?? "unknown").
+            """
             let label = condensed ? "Notes taken from the transcript" : "Transcript"
-            return try await respond(
-                to: "\(header)\n\n\(label):\n\n\(text)",
-                instructions: summaryInstructions
-            )
+            let s = LanguageModelSession(instructions: summaryInstructions(for: session))
+            return try await s.respond(to: "\(header)\n\n\(label):\n\n\(text)", generating: GeneratedDigest.self).content
         } catch let error as LanguageModelSession.GenerationError {
             if case .exceededContextWindowSize = error, chunkSize > 1000 {
-                return try await summarizeOnDevice(transcript, header: header, chunkSize: chunkSize / 2)
+                return try await summarize(transcript, session: session, chunkSize: chunkSize / 2)
             }
             throw error
         }
     }
 
-    private static func respond(to prompt: String, instructions: String) async throws -> String {
-        let session = LanguageModelSession(instructions: instructions)
-        return try await session.respond(to: prompt).content
+    private static func apply(_ digest: GeneratedDigest, to session: CaptionSession) {
+        var markdown = "## Overview\n\(digest.overview)\n"
+        func section(_ title: String, _ items: [String]) {
+            let items = items.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+            guard !items.isEmpty else { return }
+            markdown += "\n## \(title)\n" + items.map { "- \($0)" }.joined(separator: "\n") + "\n"
+        }
+        section("Key points", digest.keyPoints)
+        section("Decisions", digest.decisions)
+        section("Possibly misheard", digest.possiblyMisheard)
+
+        session.overview = digest.overview
+        session.summary = markdown
+        session.summarySource = "apple"
+        session.topics = digest.topics
+        session.actions = digest.actions.compactMap { action(from: $0, in: session) }
+    }
+
+    private static func action(from generated: GeneratedAction, in session: CaptionSession) -> ActionItem? {
+        let task = generated.task.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !task.isEmpty else { return nil }
+        let isOwnNote = session.category == .voiceNote
+        let person = generated.person.trimmingCharacters(in: .whitespacesAndNewlines)
+        let owner: ActionItem.Owner
+        switch generated.owner {
+        case .speakerSelf, .unspecified:
+            // Without speaker labels, "I'll do it" in a conversation could be anyone.
+            owner = isOwnNote ? .me : .unclear
+        case .namedPerson:
+            owner = person.isEmpty ? .unclear : .other
+        }
+        return ActionItem(
+            task: task,
+            owner: owner,
+            person: owner == .other ? person : "",
+            due: generated.due.trimmingCharacters(in: .whitespacesAndNewlines),
+            dueDate: parseDate(generated.dueDate),
+            quote: generated.quote.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+    }
+
+    private static func parseDate(_ text: String) -> Date? {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.date(from: text.trimmingCharacters(in: .whitespaces))
+    }
+
+    private static func basicDayBrief(_ sessions: [CaptionSession]) -> String {
+        guard !sessions.isEmpty else { return "Nothing was recorded on this day." }
+        return "You recorded " + DayStats(sessions).description + "."
     }
 
     /// Splits text into pieces of at most `size` characters, breaking at sentence or word boundaries.
@@ -125,7 +319,52 @@ enum Summarizer {
     }
 }
 
-/// Picks the most representative sentences by word frequency. Used when Apple Intelligence isn't available.
+extension SessionCategory {
+    init(_ generated: GeneratedCategory) {
+        switch generated {
+        case .conversation: self = .conversation
+        case .meeting: self = .meeting
+        case .voiceNote: self = .voiceNote
+        case .phoneCall: self = .phoneCall
+        case .lecture: self = .lecture
+        case .media: self = .media
+        }
+    }
+}
+
+/// Counts of a day's sessions by category, e.g. "2 meetings, 1 lecture and 4 voice notes".
+struct DayStats: CustomStringConvertible {
+    let counts: [(SessionCategory?, Int)]
+
+    init(_ sessions: [CaptionSession]) {
+        var byCategory: [String: Int] = [:]
+        for s in sessions { byCategory[s.categoryRaw, default: 0] += 1 }
+        let order: [SessionCategory?] = SessionCategory.allCases.map { $0 } + [nil]
+        counts = order.compactMap { cat in
+            let n = byCategory[cat?.rawValue ?? ""] ?? 0
+            return n > 0 ? (cat, n) : nil
+        }
+    }
+
+    var description: String {
+        let parts = counts.map { cat, n -> String in
+            let noun: String
+            switch cat {
+            case .conversation: noun = n == 1 ? "conversation" : "conversations"
+            case .meeting: noun = n == 1 ? "meeting" : "meetings"
+            case .voiceNote: noun = n == 1 ? "voice note" : "voice notes"
+            case .phoneCall: noun = n == 1 ? "call" : "calls"
+            case .lecture: noun = n == 1 ? "lecture or talk" : "lectures or talks"
+            case .media: noun = n == 1 ? "TV or media session" : "TV or media sessions"
+            case nil: noun = n == 1 ? "recording" : "recordings"
+            }
+            return "\(n) \(noun)"
+        }
+        guard parts.count > 1 else { return parts.first ?? "nothing" }
+        return parts.dropLast().joined(separator: ", ") + " and " + parts.last!
+    }
+}
+
 enum BasicSummary {
     private static let stopwords: Set<String> = Set("""
     a an the and or but if then so of to in on at for with from by as is are was were be been being it its \

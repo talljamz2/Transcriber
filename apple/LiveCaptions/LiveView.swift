@@ -68,7 +68,6 @@ struct LiveView: View {
                 Image(systemName: "circle.fill").foregroundStyle(.red).font(.caption)
                 Text("Listening…").foregroundStyle(.secondary)
             } else {
-                if controller.isSummarizing { ProgressView().controlSize(.small) }
                 Text(controller.status).foregroundStyle(.secondary)
             }
             Spacer()
@@ -98,7 +97,7 @@ struct LiveView: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(controller.isRecording ? .red : .accentColor)
-            .disabled(isPreparing || controller.isSummarizing)
+            .disabled(isPreparing)
             .keyboardShortcut(.space, modifiers: [])
 
             Button {

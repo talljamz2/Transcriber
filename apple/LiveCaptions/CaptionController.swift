@@ -10,10 +10,13 @@ enum SettingsKey {
     static let captionSize = "captionSize"
     static let captionFont = "captionFont"
     static let keepAwake = "keepScreenOn"
-    static let autoSummarize = "autoSummarize"
+    static let eveningReminder = "eveningReminder"
+    /// Minutes after midnight, e.g. 1200 for 8:00 PM.
+    static let reminderMinutes = "reminderMinutes"
 }
 
-/// Ties a live transcriber to a saved session: records, saves, and summarizes.
+/// Ties a live transcriber to saved sessions: records and saves them, then sorts and summarizes
+/// them in the background, builds daily summaries, and keeps the evening reminder up to date.
 @MainActor
 @Observable
 final class CaptionController {
@@ -22,9 +25,12 @@ final class CaptionController {
     private(set) var current: CaptionSession?
     private(set) var status = "Tap Start to begin captioning."
     private(set) var errorMessage: String?
-    private(set) var isSummarizing = false
+    /// Days whose summary is being built right now.
+    private(set) var buildingDays: Set<Date> = []
 
     private let context: ModelContext
+    private var queue: [(session: CaptionSession, full: Bool)] = []
+    private var worker: Task<Void, Never>?
     #if os(macOS)
     private var awakeActivity: NSObjectProtocol?
     #endif
@@ -35,6 +41,8 @@ final class CaptionController {
         self.context = context
         transcriber.onFinal = { [weak self] text in self?.append(text) }
     }
+
+    // MARK: - Recording
 
     func start() async {
         errorMessage = nil
@@ -62,22 +70,11 @@ final class CaptionController {
             return
         }
         session.endedAt = .now
+        session.processing = .pending
         save()
-
-        if UserDefaults.standard.object(forKey: SettingsKey.autoSummarize) as? Bool ?? true {
-            status = "Saved. Writing summary…"
-            await summarize(session)
-            status = "Saved and summarized. Open the Saved tab to read it."
-        } else {
-            status = "Saved. Open the Saved tab to read or summarize it."
-        }
-    }
-
-    func summarize(_ session: CaptionSession) async {
-        isSummarizing = true
-        defer { isSummarizing = false }
-        await Summarizer.summarize(session)
-        save()
+        status = "Saved. Sorting and summarizing in the background."
+        enqueue(session)
+        await EveningReminder.requestPermissionIfNeeded()
     }
 
     private func append(_ text: String) {
@@ -87,6 +84,159 @@ final class CaptionController {
         session.segments.append(Segment(time: .now, text: text))
         session.endedAt = .now
         if session.title.isEmpty { session.title = CaptionSession.makeTitle(from: text) }
+    }
+
+    // MARK: - Background processing
+
+    /// Picks up sessions that weren't finished, e.g. because the app was closed mid-way.
+    func resumePendingWork() {
+        let pending = ProcessingState.pending.rawValue
+        let processing = ProcessingState.processing.rawValue
+        let descriptor = FetchDescriptor<CaptionSession>(
+            predicate: #Predicate { $0.processingRaw == pending || $0.processingRaw == processing },
+            sortBy: [SortDescriptor(\.startedAt)]
+        )
+        for session in (try? context.fetch(descriptor)) ?? [] where !isLive(session) {
+            enqueue(session)
+        }
+        Task { await EveningReminder.update(context: context) }
+    }
+
+    /// Re-summarizes a session in full (also used for TV & media sessions on request).
+    func summarize(_ session: CaptionSession) {
+        session.processing = .pending
+        enqueue(session, full: true)
+    }
+
+    func isQueued(_ session: CaptionSession) -> Bool {
+        session.processing == .pending || session.processing == .processing
+    }
+
+    private func enqueue(_ session: CaptionSession, full: Bool = false) {
+        if let index = queue.firstIndex(where: { $0.session.id == session.id }) {
+            queue[index].full = queue[index].full || full
+        } else {
+            queue.append((session, full))
+        }
+        guard worker == nil else { return }
+        worker = Task { [weak self] in
+            while let job = self?.nextJob() {
+                await SessionProcessor.process(job.session, full: job.full)
+                self?.save()
+                await self?.refreshReminder()
+            }
+            self?.worker = nil
+        }
+    }
+
+    private func nextJob() -> (session: CaptionSession, full: Bool)? {
+        while !queue.isEmpty {
+            let job = queue.removeFirst()
+            if !job.session.isDeleted, job.session.modelContext != nil { return job }
+        }
+        return nil
+    }
+
+    // MARK: - Editing
+
+    func setCategory(_ category: SessionCategory, for session: CaptionSession) {
+        session.category = category
+        session.categoryChosenByUser = true
+        session.reviewed = false
+        // A session moved out of TV & media deserves a full summary if it doesn't have one.
+        if !category.isLowValue && session.summarySource != "apple" && !isLive(session) {
+            summarize(session)
+        }
+        changed()
+    }
+
+    func setOwner(_ owner: ActionItem.Owner, for actionID: UUID, in session: CaptionSession) {
+        guard let index = session.actions.firstIndex(where: { $0.id == actionID }) else { return }
+        var actions = session.actions
+        actions[index].owner = owner
+        session.actions = actions
+        save()
+    }
+
+    func keep(_ session: CaptionSession) {
+        session.reviewed = true
+        changed()
+    }
+
+    func delete(_ sessions: [CaptionSession]) {
+        for session in sessions where !isLive(session) {
+            context.delete(session)
+        }
+        changed()
+    }
+
+    func isLive(_ session: CaptionSession) -> Bool {
+        isRecording && current?.id == session.id
+    }
+
+    private func changed() {
+        save()
+        Task { await refreshReminder() }
+    }
+
+    // MARK: - Daily summaries
+
+    func daySummary(for day: Date) -> DaySummary? {
+        let descriptor = FetchDescriptor<DaySummary>(predicate: #Predicate { $0.day == day })
+        return try? context.fetch(descriptor).first
+    }
+
+    /// The sessions that count toward a day's summary (everything except TV & media).
+    func usefulSessions(on day: Date) -> [CaptionSession] {
+        let end = Calendar.current.date(byAdding: .day, value: 1, to: day) ?? day
+        let descriptor = FetchDescriptor<CaptionSession>(
+            predicate: #Predicate { $0.startedAt >= day && $0.startedAt < end },
+            sortBy: [SortDescriptor(\.startedAt)]
+        )
+        return ((try? context.fetch(descriptor)) ?? []).filter { !($0.category?.isLowValue ?? false) && !isLive($0) }
+    }
+
+    func isDaySummaryStale(_ day: Date) -> Bool {
+        daySummary(for: day)?.sourceFingerprint != fingerprint(usefulSessions(on: day))
+    }
+
+    /// Builds (or refreshes) a day's summary, first finishing any of the day's sessions still waiting.
+    func buildDaySummary(for day: Date) async {
+        guard !buildingDays.contains(day) else { return }
+        buildingDays.insert(day)
+        defer { buildingDays.remove(day) }
+
+        // Wait (up to 10 minutes) for the day's sessions to be sorted and summarized.
+        let deadline = Date.now.addingTimeInterval(600)
+        while usefulSessions(on: day).contains(where: isQueued), Date.now < deadline {
+            for session in usefulSessions(on: day) where session.processing == .pending {
+                enqueue(session)
+            }
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+
+        let sessions = usefulSessions(on: day)
+        let summary = daySummary(for: day) ?? {
+            let new = DaySummary(day: day)
+            context.insert(new)
+            return new
+        }()
+        let result = await SessionProcessor.summarizeDay(sessions)
+        summary.brief = result.brief
+        summary.themes = result.themes
+        summary.generatedAt = .now
+        summary.sourceFingerprint = fingerprint(sessions)
+        changed()
+    }
+
+    private func fingerprint(_ sessions: [CaptionSession]) -> String {
+        sessions.map { "\($0.id.uuidString):\($0.summary.count):\($0.categoryRaw)" }.joined(separator: "|")
+    }
+
+    // MARK: - Helpers
+
+    func refreshReminder() async {
+        await EveningReminder.update(context: context)
     }
 
     private func save() {

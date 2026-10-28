@@ -6,37 +6,76 @@ import UIKit
 import AppKit
 #endif
 
+enum SavedRoute: Hashable {
+    case day(Date)
+    case tidyUp
+}
+
 struct HistoryView: View {
-    @Environment(\.modelContext) private var context
     @Environment(CaptionController.self) private var controller
     @Query(sort: \CaptionSession.startedAt, order: .reverse) private var sessions: [CaptionSession]
+
+    private var days: [(day: Date, sessions: [CaptionSession])] {
+        Dictionary(grouping: sessions, by: \.day)
+            .map { (day: $0.key, sessions: $0.value.sorted { $0.startedAt > $1.startedAt }) }
+            .sorted { $0.day > $1.day }
+    }
+
+    private var reviewCount: Int { sessions.filter(\.needsReview).count }
 
     var body: some View {
         Group {
             if sessions.isEmpty {
                 ContentUnavailableView(
-                    "No saved transcripts",
+                    "No saved sessions",
                     systemImage: "tray",
-                    description: Text("Start a live session and press Stop to save it.")
+                    description: Text("Everything you caption is saved here automatically, sorted by day.")
                 )
             } else {
                 List {
-                    ForEach(sessions) { session in
-                        NavigationLink(value: session) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(session.displayTitle).font(.headline)
-                                Text(meta(for: session))
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
+                    if reviewCount > 0 {
+                        Section {
+                            NavigationLink(value: SavedRoute.tidyUp) {
+                                Label {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Tidy up").font(.headline)
+                                        Text(reviewCount == 1 ? "1 session looks like TV or media" : "\(reviewCount) sessions look like TV or media")
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                } icon: {
+                                    Image(systemName: "sparkles").foregroundStyle(.orange)
+                                }
                             }
-                            .padding(.vertical, 4)
                         }
                     }
-                    .onDelete { offsets in
-                        for index in offsets where !isLive(sessions[index]) {
-                            context.delete(sessions[index])
+
+                    ForEach(days, id: \.day) { group in
+                        Section(Format.day(group.day)) {
+                            let useful = group.sessions.filter { !($0.category?.isLowValue ?? false) }
+                            if !useful.isEmpty {
+                                NavigationLink(value: SavedRoute.day(group.day)) {
+                                    Label {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text("Daily summary").font(.headline)
+                                            Text(DayStats(useful).description.capitalizedFirst)
+                                                .font(.subheadline)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    } icon: {
+                                        Image(systemName: "sun.max").foregroundStyle(.yellow)
+                                    }
+                                }
+                            }
+                            ForEach(group.sessions) { session in
+                                NavigationLink(value: session) {
+                                    SessionRow(session: session)
+                                }
+                            }
+                            .onDelete { offsets in
+                                controller.delete(offsets.map { group.sessions[$0] })
+                            }
                         }
-                        try? context.save()
                     }
                 }
             }
@@ -45,62 +84,97 @@ struct HistoryView: View {
         .navigationDestination(for: CaptionSession.self) { session in
             SessionDetailView(session: session)
         }
+        .navigationDestination(for: SavedRoute.self) { route in
+            switch route {
+            case .day(let day): DayView(day: day)
+            case .tidyUp: TidyUpView()
+            }
+        }
+    }
+}
+
+struct SessionRow: View {
+    let session: CaptionSession
+    @Environment(CaptionController.self) private var controller
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: session.category?.symbol ?? "text.bubble")
+                .foregroundStyle(.secondary)
+                .frame(width: 24)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(session.displayTitle).font(.headline).lineLimit(2)
+                if !session.oneLiner.isEmpty {
+                    Text(session.oneLiner).font(.subheadline).lineLimit(2)
+                }
+                HStack(spacing: 6) {
+                    Text(meta).foregroundStyle(.secondary)
+                    if controller.isLive(session) {
+                        Text("Recording").foregroundStyle(.red)
+                    } else if controller.isQueued(session) {
+                        ProgressView().controlSize(.mini)
+                        Text("Sorting…").foregroundStyle(.secondary)
+                    } else if session.needsReview {
+                        Text("Review")
+                            .padding(.horizontal, 6)
+                            .background(.orange.opacity(0.2), in: Capsule())
+                            .foregroundStyle(.orange)
+                    }
+                }
+                .font(.caption)
+            }
+        }
+        .padding(.vertical, 2)
     }
 
-    private func isLive(_ session: CaptionSession) -> Bool {
-        controller.isRecording && controller.current?.id == session.id
-    }
-
-    private func meta(for session: CaptionSession) -> String {
-        var parts = [Format.dateTime(session.startedAt), Format.duration(session.duration), "\(session.wordCount) words"]
-        if isLive(session) { parts.append("recording now") }
+    private var meta: String {
+        var parts = [Format.time(session.startedAt), Format.duration(session.duration)]
+        if let category = session.category { parts.append(category.name) }
         return parts.joined(separator: " · ")
     }
 }
 
 struct SessionDetailView: View {
     @Bindable var session: CaptionSession
-    @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @Environment(CaptionController.self) private var controller
     @State private var confirmDelete = false
     @State private var copied = false
     @AppStorage(SettingsKey.captionFont) private var captionFont: CaptionFont = .system
 
+    private var isLive: Bool { controller.isLive(session) }
+    private var isWorking: Bool { controller.isQueued(session) }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                TextField("Title", text: $session.title)
-                    .font(.title2.bold())
-                    .textFieldStyle(.plain)
-                Text("\(Format.dateTime(session.startedAt)) · \(Format.duration(session.duration)) · \(session.wordCount) words")
-                    .foregroundStyle(.secondary)
+                header
 
-                actions
+                if session.needsReview { reviewBanner }
 
-                Text("Summary").font(.title3.bold())
-                GroupBox {
-                    if controller.isSummarizing {
-                        HStack {
-                            ProgressView()
-                            Text("Writing summary…").foregroundStyle(.secondary)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    } else if session.summary.isEmpty {
-                        Text("No summary yet. Press “Summarize” to create one.")
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
-                        SummaryText(markdown: session.summary, font: captionFont)
-                        if session.summarySource == "apple" {
-                            Text("Summary written on-device by Apple Intelligence.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.top, 4)
-                        }
+                if isWorking {
+                    HStack {
+                        ProgressView()
+                        Text("Sorting and summarizing…").foregroundStyle(.secondary)
                     }
                 }
+
+                if !session.actions.isEmpty {
+                    Text("Actions").font(.title3.bold())
+                    ActionsList(entries: session.actions.map { ActionEntry(session: session, action: $0) }, showSource: false)
+                }
+
+                Text("Summary").font(.title3.bold())
+                GroupBox { summaryContent }
+
+                if !session.topics.isEmpty {
+                    Text(session.topics.map { "#\($0)" }.joined(separator: "  "))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                buttons
 
                 Text("Full transcript").font(.title3.bold())
                 GroupBox {
@@ -125,10 +199,9 @@ struct SessionDetailView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .confirmationDialog("Delete this transcript?", isPresented: $confirmDelete) {
+        .confirmationDialog("Delete this session?", isPresented: $confirmDelete) {
             Button("Delete", role: .destructive) {
-                context.delete(session)
-                try? context.save()
+                controller.delete([session])
                 dismiss()
             }
         } message: {
@@ -136,13 +209,83 @@ struct SessionDetailView: View {
         }
     }
 
-    private var actions: some View {
-        let isLive = controller.isRecording && controller.current?.id == session.id
-        return HStack {
-            Button(session.summary.isEmpty ? "Summarize" : "Summarize again") {
-                Task { await controller.summarize(session) }
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            TextField("Title", text: $session.title)
+                .font(.title2.bold())
+                .textFieldStyle(.plain)
+            Text("\(Format.dateTime(session.startedAt)) · \(Format.duration(session.duration)) · \(session.wordCount) words")
+                .foregroundStyle(.secondary)
+            Menu {
+                ForEach(SessionCategory.allCases) { category in
+                    Button {
+                        controller.setCategory(category, for: session)
+                    } label: {
+                        Label(category.name, systemImage: category.symbol)
+                    }
+                }
+            } label: {
+                Label(session.category?.name ?? "Not sorted yet", systemImage: session.category?.symbol ?? "questionmark.circle")
             }
-            .disabled(controller.isSummarizing || isLive)
+            .fixedSize()
+            .disabled(isLive)
+            if !session.oneLiner.isEmpty {
+                Text(session.oneLiner).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var reviewBanner: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("This looks like TV or media.", systemImage: "tv")
+                    .font(.headline)
+                Text("Keep it, or delete it if you don't need it.")
+                    .foregroundStyle(.secondary)
+                HStack {
+                    Button("Keep") { controller.keep(session) }
+                    Button("Delete", role: .destructive) { confirmDelete = true }
+                }
+                .buttonStyle(.bordered)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .backgroundStyle(.orange.opacity(0.12))
+    }
+
+    @ViewBuilder
+    private var summaryContent: some View {
+        if isWorking {
+            Text("The summary will appear here in a moment.")
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else if session.summary.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(session.category?.isLowValue == true
+                     ? "TV & media sessions aren't summarized automatically."
+                     : "No summary yet.")
+                    .foregroundStyle(.secondary)
+                Button("Summarize") { controller.summarize(session) }
+                    .buttonStyle(.bordered)
+                    .disabled(isLive)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            SummaryText(markdown: session.summary, font: captionFont)
+            if session.summarySource == "apple" {
+                Text("Written on this device by Apple Intelligence.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 4)
+            }
+        }
+    }
+
+    private var buttons: some View {
+        HStack {
+            Button("Summarize again") { controller.summarize(session) }
+                .disabled(isWorking || isLive || session.summary.isEmpty)
 
             Button(copied ? "Copied" : "Copy") {
                 copy(session.exportText())
@@ -210,4 +353,8 @@ struct SummaryText: View {
     private func inline(_ text: String) -> AttributedString {
         (try? AttributedString(markdown: text)) ?? AttributedString(text)
     }
+}
+
+extension String {
+    var capitalizedFirst: String { prefix(1).uppercased() + dropFirst() }
 }

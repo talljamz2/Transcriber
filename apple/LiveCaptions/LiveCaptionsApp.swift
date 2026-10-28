@@ -9,7 +9,7 @@ struct LiveCaptionsApp: App {
     init() {
         let container: ModelContainer
         do {
-            container = try ModelContainer(for: CaptionSession.self)
+            container = try ModelContainer(for: CaptionSession.self, DaySummary.self)
         } catch {
             fatalError("Couldn't open the transcript store: \(error)")
         }
@@ -30,6 +30,9 @@ struct LiveCaptionsApp: App {
 }
 
 struct ContentView: View {
+    @Environment(CaptionController.self) private var controller
+    @Environment(\.scenePhase) private var scenePhase
+
     var body: some View {
         TabView {
             Tab("Live", systemImage: "captions.bubble") {
@@ -41,6 +44,10 @@ struct ContentView: View {
             Tab("Settings", systemImage: "gear") {
                 NavigationStack { SettingsView() }
             }
+        }
+        .task { controller.resumePendingWork() }
+        .onChange(of: scenePhase) {
+            if scenePhase == .active { Task { await controller.refreshReminder() } }
         }
     }
 }
