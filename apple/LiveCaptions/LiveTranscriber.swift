@@ -43,6 +43,7 @@ final class LiveTranscriber {
 
     private let engine = AVAudioEngine()
     private var analyzer: SpeechAnalyzer?
+    private var analyzerFinished = false
     private var feeder: AudioFeeder?
     private var resultsTask: Task<Void, Never>?
     private var observers: [NSObjectProtocol] = []
@@ -65,6 +66,7 @@ final class LiveTranscriber {
         engine.stop()
         feeder?.finish()
         try? await analyzer?.finalizeAndFinishThroughEndOfInput()
+        analyzerFinished = true
 
         // Let the last results arrive, but don't wait forever.
         if let pending = resultsTask {
@@ -144,10 +146,11 @@ final class LiveTranscriber {
     private func tearDown() async {
         resultsTask?.cancel()
         resultsTask = nil
-        if let analyzer {
+        if let analyzer, !analyzerFinished {
             await analyzer.cancelAndFinishNow()
         }
         analyzer = nil
+        analyzerFinished = false
         feeder?.finish()
         feeder = nil
         observers.forEach { NotificationCenter.default.removeObserver($0) }

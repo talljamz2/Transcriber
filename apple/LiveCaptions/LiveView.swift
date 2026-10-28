@@ -14,35 +14,28 @@ struct LiveView: View {
                 .padding(.horizontal)
                 .padding(.top, 8)
 
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: captionSize * 0.45) {
-                        if paragraphs.isEmpty && controller.transcriber.volatileText.isEmpty {
-                            Text("Words spoken around you will appear here.")
-                                .font(.title3)
-                                .foregroundStyle(.secondary)
-                        }
-                        ForEach(paragraphs) { paragraph in
-                            Text(paragraph.text)
-                        }
-                        if !controller.transcriber.volatileText.isEmpty {
-                            Text(controller.transcriber.volatileText)
-                                .foregroundStyle(.secondary)
-                        }
-                        Color.clear.frame(height: 1).id("bottom")
+            ScrollView {
+                VStack(alignment: .leading, spacing: captionSize * 0.45) {
+                    if paragraphs.isEmpty && controller.transcriber.volatileText.isEmpty {
+                        Text("Words spoken around you will appear here.")
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
                     }
-                    .font(.system(size: captionSize, weight: .medium))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding()
-                    .textSelection(.enabled)
+                    ForEach(paragraphs) { paragraph in
+                        Text(paragraph.text)
+                    }
+                    if !controller.transcriber.volatileText.isEmpty {
+                        Text(controller.transcriber.volatileText)
+                            .foregroundStyle(.secondary)
+                    }
                 }
-                .onChange(of: controller.current?.segments.count) {
-                    withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
-                }
-                .onChange(of: controller.transcriber.volatileText) {
-                    proxy.scrollTo("bottom", anchor: .bottom)
-                }
+                .font(.system(size: captionSize, weight: .medium))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+                .textSelection(.enabled)
             }
+            // Keep the newest words in view as the text grows.
+            .defaultScrollAnchor(.bottom, for: .sizeChanges)
 
             Divider()
             controls
