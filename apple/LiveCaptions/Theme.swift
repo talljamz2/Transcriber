@@ -31,6 +31,9 @@ enum AppearanceMode: String, CaseIterable, Identifiable {
 enum Theme {
     static let canvas = Color(light: 0xFFFFFF, dark: 0x000000)
     static let card = Color(light: 0xF4F4F6, dark: 0x1C1C1E)
+    /// Panels that slide up over the canvas, a step lighter in dark mode so they stand apart.
+    static let sheet = Color(light: 0xFFFFFF, dark: 0x1C1C1E)
+    static let sheetCard = Color(light: 0xF4F4F6, dark: 0x2C2C2E)
     static let hairline = Color(light: 0xE3E3E8, dark: 0x2C2C2E)
     static let record = Color(light: 0xE5383B, dark: 0xFF453A)
 }

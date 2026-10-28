@@ -39,7 +39,7 @@ struct TranscriptSearchView: View {
                     .frame(maxWidth: .infinity)
                 }
                 .defaultScrollAnchor(.bottom)
-                .background(Theme.canvas)
+                .background(Theme.sheet)
                 .onChange(of: trimmedQuery) {
                     matchIndex = max(0, matches.count - 1)
                     scroll(proxy)
@@ -50,7 +50,7 @@ struct TranscriptSearchView: View {
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
-            .searchable(text: $query, prompt: "Find in transcript")
+            .searchable(text: $query, placement: searchPlacement, prompt: "Find in transcript")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
@@ -71,7 +71,17 @@ struct TranscriptSearchView: View {
                 }
             }
         }
+        .presentationBackground(Theme.sheet)
         .onAppear { if query.isEmpty { query = initialQuery } }
+    }
+
+    /// Keep the find field visible even when the panel is half height.
+    private var searchPlacement: SearchFieldPlacement {
+        #if os(iOS)
+        .navigationBarDrawer(displayMode: .always)
+        #else
+        .automatic
+        #endif
     }
 
     private var findBarPlacement: ToolbarItemPlacement {
@@ -96,7 +106,7 @@ struct TranscriptSearchView: View {
         }
         .padding(.vertical, 4)
         .padding(.horizontal, 8)
-        .background(isCurrent ? Theme.card : .clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(isCurrent ? Theme.sheetCard : .clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     /// Moves to the previous (-1) or next (+1) match, wrapping around.
