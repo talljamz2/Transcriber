@@ -307,8 +307,8 @@ struct SessionDetailView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             SummaryText(markdown: session.summary, font: captionFont)
-            if session.summarySource == "apple" {
-                Text("Written on this device by Apple Intelligence.")
+            if session.summarySource == "apple" || session.summarySource == "claude" {
+                Text(session.summarySource == "claude" ? "Written by Claude." : "Written on this device by Apple Intelligence.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)

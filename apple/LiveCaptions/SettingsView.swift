@@ -9,6 +9,11 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.appearance) private var appearance: AppearanceMode = .system
     @AppStorage(SettingsKey.eveningReminder) private var eveningReminder = true
     @AppStorage(SettingsKey.reminderMinutes) private var reminderMinutes = 20 * 60
+    @AppStorage(SettingsKey.useClaude) private var useClaude = true
+    @AppStorage(SettingsKey.claudeModel) private var claudeModel = ClaudeSummarizer.Model.haiku.rawValue
+    @State private var keyDraft = ""
+    @State private var hasKey = APIKeyStore.key != nil
+    @State private var resummarized = false
     @Environment(CaptionController.self) private var controller
 
     @State private var languages: [LanguageOption] = []
@@ -81,6 +86,50 @@ struct SettingsView: View {
                 Text("Summaries")
             } footer: {
                 Text("\(SessionProcessor.statusDescription) The reminder only appears on days with a summary to read or sessions to tidy up.")
+            }
+
+            Section {
+                if hasKey {
+                    Toggle("Use Claude for summaries", isOn: $useClaude)
+                    if useClaude {
+                        Picker("Model", selection: $claudeModel) {
+                            ForEach(ClaudeSummarizer.Model.allCases) { model in
+                                Text(model.name).tag(model.rawValue)
+                            }
+                        }
+                        Button(resummarized ? "Rewriting summaries in the background…" : "Rewrite existing summaries with Claude") {
+                            controller.resummarizeAll()
+                            resummarized = true
+                        }
+                        .disabled(resummarized)
+                    }
+                    Button("Remove API key", role: .destructive) {
+                        APIKeyStore.delete()
+                        hasKey = false
+                    }
+                } else {
+                    SecureField("Anthropic API key (sk-ant-…)", text: $keyDraft)
+                        .textContentType(.password)
+                        #if os(iOS)
+                        .textInputAutocapitalization(.never)
+                        #endif
+                        .autocorrectionDisabled()
+                    Button("Save key") {
+                        if APIKeyStore.save(keyDraft.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                            keyDraft = ""
+                            hasKey = true
+                        }
+                    }
+                    .disabled(!keyDraft.trimmingCharacters(in: .whitespaces).hasPrefix("sk-ant-"))
+                }
+            } header: {
+                Text("Better summaries with Claude")
+            } footer: {
+                if hasKey {
+                    Text("\(ClaudeSummarizer.Model(rawValue: claudeModel)?.costHint.capitalizedFirst ?? ""), billed to your Anthropic account. Transcripts are sent to Anthropic only to be summarized. Without internet, Apple Intelligence is used instead.")
+                } else {
+                    Text("Optional. Create a key at console.anthropic.com, then paste it here. It's stored in this device's Keychain. Titles and categories stay on the device; only summaries are written by Claude.")
+                }
             }
 
             Section("Microphone") {

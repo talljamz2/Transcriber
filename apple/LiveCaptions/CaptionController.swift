@@ -10,6 +10,8 @@ enum SettingsKey {
     static let captionSize = "captionSize"
     static let captionFont = "captionFont"
     static let appearance = "appearance"
+    static let useClaude = "useClaude"
+    static let claudeModel = "claudeModel"
     static let keepAwake = "keepScreenOn"
     static let eveningReminder = "eveningReminder"
     /// Minutes after midnight, e.g. 1200 for 8:00 PM.
@@ -167,6 +169,19 @@ final class CaptionController {
         }
     }
 
+    /// Rewrites every saved summary (except TV & media) with the current summary model.
+    func resummarizeAll() {
+        let done = ProcessingState.done.rawValue
+        let descriptor = FetchDescriptor<CaptionSession>(
+            predicate: #Predicate { $0.processingRaw == done },
+            sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+        )
+        for session in (try? context.fetch(descriptor)) ?? []
+        where !(session.category?.isLowValue ?? false) && !isLive(session) {
+            summarize(session)
+        }
+    }
+
     /// Re-summarizes a session in full (also used for TV & media sessions on request).
     func summarize(_ session: CaptionSession) {
         session.processing = .pending
@@ -209,7 +224,7 @@ final class CaptionController {
         session.categoryChosenByUser = true
         session.reviewed = false
         // A session moved out of TV & media deserves a full summary if it doesn't have one.
-        if !category.isLowValue && session.summarySource != "apple" && !isLive(session) {
+        if !category.isLowValue && !["apple", "claude"].contains(session.summarySource) && !isLive(session) {
             summarize(session)
         }
         changed()

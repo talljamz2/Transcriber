@@ -82,6 +82,9 @@ enum SessionProcessor {
     }
 
     static var statusDescription: String {
+        if ClaudeSummarizer.isEnabled {
+            return "Sessions are titled and sorted on this device, and summarized by \(ClaudeSummarizer.model.name)."
+        }
         switch SystemLanguageModel.default.availability {
         case .available:
             return "Every session is sorted and summarized on this device by Apple Intelligence."
@@ -103,7 +106,8 @@ enum SessionProcessor {
             session.processing = .done
             return
         }
-        guard isAvailable else {
+        let useClaude = ClaudeSummarizer.isEnabled
+        guard isAvailable || useClaude else {
             session.summary = BasicSummary.make(for: session)
             session.summarySource = "local"
             session.processing = .done
@@ -113,7 +117,8 @@ enum SessionProcessor {
         session.processing = .processing
         let text = session.transcriptText(withTimes: false)
         do {
-            if session.category == nil || session.oneLiner.isEmpty || !session.hasSmartTitle {
+            // Titles and categories are quick and free on the device.
+            if isAvailable, session.category == nil || session.oneLiner.isEmpty || !session.hasSmartTitle {
                 let result = try await classify(text)
                 if !session.categoryChosenByUser { session.category = SessionCategory(result.category) }
                 session.oneLiner = result.label
@@ -123,20 +128,64 @@ enum SessionProcessor {
                 session.processing = .done
                 return
             }
+
+            var claudeError: Error?
+            if useClaude {
+                do {
+                    let digest = try await ClaudeSummarizer.digest(transcript: text, header: header(for: session))
+                    if !isAvailable || session.category == nil {
+                        if !session.categoryChosenByUser, let category = SessionCategory(rawValue: digest.category) {
+                            session.category = category
+                        }
+                        if session.oneLiner.isEmpty { session.oneLiner = digest.label }
+                        applyTitle(digest.title, to: session)
+                    }
+                    apply(SummaryParts(digest), to: session, source: "claude")
+                    session.processing = .done
+                    return
+                } catch {
+                    claudeError = error
+                }
+            }
+
+            guard isAvailable else { throw claudeError ?? ClaudeSummarizer.Failure.empty }
             let digest = try await summarize(text, session: session)
-            apply(digest, to: session)
+            apply(SummaryParts(digest), to: session, source: "apple")
+            if let claudeError {
+                session.summary += "\n## Note\nWritten by Apple Intelligence because Claude wasn't reachable (\(claudeError.localizedDescription)). Tap Summarize again to retry with Claude.\n"
+            }
             session.processing = .done
         } catch {
             session.summary = BasicSummary.make(for: session)
-                + "\n\n## Note\nApple Intelligence couldn't summarize this transcript (\(error.localizedDescription)), so this is a basic summary."
+                + "\n\n## Note\nThe summary couldn't be written (\(error.localizedDescription)), so this is a basic summary. Tap Summarize again to retry."
             session.summarySource = "local"
             session.processing = .failed
         }
     }
 
+    private static func header(for session: CaptionSession) -> String {
+        """
+        Recorded on \(session.startedAt.formatted(.dateTime.weekday(.wide).day().month(.wide).year())) \
+        at \(Format.time(session.startedAt)), lasting \(Format.duration(session.duration)). \
+        Kind of recording: \(session.category?.name ?? "unknown").
+        """
+    }
+
     /// A short overview of a day, built from its sessions' summaries.
     static func summarizeDay(_ sessions: [CaptionSession]) async -> (brief: String, themes: [String]) {
-        guard isAvailable, !sessions.isEmpty else { return (basicDayBrief(sessions), []) }
+        guard !sessions.isEmpty else { return (basicDayBrief(sessions), []) }
+        if ClaudeSummarizer.isEnabled {
+            let detail = sessions.map { s in
+                var block = "• \(Format.time(s.startedAt)) — \(s.category?.name ?? "Recording"): \(s.displayTitle)"
+                if !s.overview.isEmpty { block += "\n  \(s.overview)" }
+                for action in s.actions { block += "\n  Action [\(action.ownerLabel)]: \(action.task)\(action.due.isEmpty ? "" : " (\(action.due))")" }
+                return block
+            }.joined(separator: "\n")
+            if let result = try? await ClaudeSummarizer.dayBrief(dayName: Format.day(sessions[0].day), sessions: detail) {
+                return result
+            }
+        }
+        guard isAvailable else { return (basicDayBrief(sessions), []) }
 
         func lines(detailed: Bool) -> String {
             sessions.map { s in
@@ -263,31 +312,31 @@ enum SessionProcessor {
         }
     }
 
-    private static func apply(_ digest: GeneratedDigest, to session: CaptionSession) {
-        var markdown = "## Overview\n\(digest.overview)\n"
+    private static func apply(_ parts: SummaryParts, to session: CaptionSession, source: String) {
+        var markdown = "## Overview\n\(parts.overview)\n"
         func section(_ title: String, _ items: [String]) {
             let items = items.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
             guard !items.isEmpty else { return }
             markdown += "\n## \(title)\n" + items.map { "- \($0)" }.joined(separator: "\n") + "\n"
         }
-        section("Key points", digest.keyPoints)
-        section("Decisions", digest.decisions)
-        section("Possibly misheard", digest.possiblyMisheard)
+        section("Key points", parts.keyPoints)
+        section("Decisions", parts.decisions)
+        section("Possibly misheard", parts.possiblyMisheard)
 
-        session.overview = digest.overview
+        session.overview = parts.overview
         session.summary = markdown
-        session.summarySource = "apple"
-        session.topics = digest.topics
-        session.actions = digest.actions.compactMap { action(from: $0, in: session) }
+        session.summarySource = source
+        session.topics = parts.topics
+        session.actions = parts.actions.compactMap { action(from: $0, in: session) }
     }
 
-    private static func action(from generated: GeneratedAction, in session: CaptionSession) -> ActionItem? {
-        let task = generated.task.trimmingCharacters(in: .whitespacesAndNewlines)
+    private static func action(from draft: SummaryParts.Action, in session: CaptionSession) -> ActionItem? {
+        let task = draft.task.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !task.isEmpty else { return nil }
         let isOwnNote = session.category == .voiceNote
-        let person = generated.person.trimmingCharacters(in: .whitespacesAndNewlines)
+        let person = draft.person.trimmingCharacters(in: .whitespacesAndNewlines)
         let owner: ActionItem.Owner
-        switch generated.owner {
+        switch draft.kind {
         case .speakerSelf, .unspecified:
             // Without speaker labels, "I'll do it" in a conversation could be anyone.
             owner = isOwnNote ? .me : .unclear
@@ -298,9 +347,9 @@ enum SessionProcessor {
             task: task,
             owner: owner,
             person: owner == .other ? person : "",
-            due: generated.due.trimmingCharacters(in: .whitespacesAndNewlines),
-            dueDate: parseDate(generated.dueDate),
-            quote: generated.quote.trimmingCharacters(in: .whitespacesAndNewlines)
+            due: draft.due.trimmingCharacters(in: .whitespacesAndNewlines),
+            dueDate: parseDate(draft.dueDate),
+            quote: draft.quote.trimmingCharacters(in: .whitespacesAndNewlines)
         )
     }
 
@@ -335,6 +384,59 @@ enum SessionProcessor {
         let tail = remaining.trimmingCharacters(in: .whitespacesAndNewlines)
         if !tail.isEmpty { result.append(tail) }
         return result
+    }
+}
+
+/// A summary in one shape, whichever model wrote it.
+struct SummaryParts {
+    struct Action {
+        enum Kind { case speakerSelf, namedPerson, unspecified }
+        var task: String
+        var kind: Kind
+        var person: String
+        var due: String
+        var dueDate: String
+        var quote: String
+    }
+
+    var overview: String
+    var keyPoints: [String]
+    var decisions: [String]
+    var possiblyMisheard: [String]
+    var topics: [String]
+    var actions: [Action]
+
+    init(_ digest: GeneratedDigest) {
+        overview = digest.overview
+        keyPoints = digest.keyPoints
+        decisions = digest.decisions
+        possiblyMisheard = digest.possiblyMisheard
+        topics = digest.topics
+        actions = digest.actions.map { a in
+            let kind: Action.Kind
+            switch a.owner {
+            case .speakerSelf: kind = .speakerSelf
+            case .namedPerson: kind = .namedPerson
+            case .unspecified: kind = .unspecified
+            }
+            return Action(task: a.task, kind: kind, person: a.person, due: a.due, dueDate: a.dueDate, quote: a.quote)
+        }
+    }
+
+    init(_ digest: ClaudeSummarizer.Digest) {
+        overview = digest.overview
+        keyPoints = digest.keyPoints
+        decisions = digest.decisions
+        possiblyMisheard = digest.possiblyMisheard
+        topics = digest.topics
+        actions = digest.actions.map { a in
+            let kind: Action.Kind = switch a.owner {
+            case "speaker_self": .speakerSelf
+            case "named_person": .namedPerson
+            default: .unspecified
+            }
+            return Action(task: a.task, kind: kind, person: a.person, due: a.due, dueDate: a.dueDate, quote: a.quote)
+        }
     }
 }
 

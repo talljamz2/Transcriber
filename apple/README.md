@@ -45,7 +45,8 @@ With a free Apple ID, apps installed this way stop opening after **7 days**; jus
 - **Saved** is grouped by day. Each day has a **Daily summary**: a short recap, every action from the day, and each session in one line. TV & media is left out.
 - **Tidy up:** sessions that look like TV or media are flagged for review. Delete them or keep them; nothing is ever deleted automatically. TV & media sessions aren't summarized unless you tap **Summarize**.
 - **Evening reminder** (Settings): one notification on days with a summary to read or sessions to tidy up.
-- **Settings:** spoken language, font and text size, keep the screen on, reminder time.
+- **Better summaries with Claude (optional):** paste an Anthropic API key in **Settings → Better summaries with Claude**. Summaries, actions and daily summaries are then written by Claude (Haiku 5.5 by default, under 1¢ per hour of conversation); titles and categories stay on the device. The key is kept in the Keychain. Without internet, Apple Intelligence is used.
+- **Settings:** spoken language, font and text size, keep the screen on, reminder time, Claude summaries.
 
 Only text is stored, never audio: an hour of conversation takes about 70 KB.
 
